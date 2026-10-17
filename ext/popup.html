@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>skytreeone</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f6f6f2; --fg: #1d2420; --dim: #66706a; --accent: #3f7d4f; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151d1a; --fg: #e3e8e2; --dim: #8d9a92; --accent: #7cc48e; } }
+  body { margin: 0; width: 260px; padding: 14px 16px 12px; background: var(--bg); color: var(--fg);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { margin: 0 0 10px; font-size: 14px; font-weight: 650; letter-spacing: .02em; }
+  label { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; margin: 10px 0; }
+  label.check { grid-template-columns: auto 1fr; }
+  input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+  input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+  output { color: var(--dim); font-variant-numeric: tabular-nums; }
+  .note { color: var(--dim); font-size: 11px; margin: -6px 0 8px 22px; }
+  hr { border: 0; border-top: 1px solid color-mix(in srgb, var(--dim) 30%, transparent); margin: 12px 0; }
+</style>
+</head>
+<body>
+<h1>skytreeone</h1>
+<label class="check"><input type="checkbox" id="enabled"> Forest behind Bluesky</label>
+<label class="check"><input type="checkbox" id="sound"> Sound</label>
+<div class="note">Starts after your next click on Bluesky.</div>
+<label>Volume <output for="vol"></output><input type="range" id="vol" min="0" max="100" step="5"></label>
+<hr>
+<label>Feed panel <output for="glass"></output><input type="range" id="glass" min="0" max="100" step="5"></label>
+<label>Blur <output for="blur"></output><input type="range" id="blur" min="0" max="20" step="1"></label>
+<hr>
+<label>Minutes per scene <output for="mins"></output><input type="range" id="mins" min="1" max="60" step="1"></label>
+<label>Pixel height <output for="px"></output><input type="range" id="px" min="120" max="480" step="20"></label>
+<label>Frame cap <output for="fps"></output><input type="range" id="fps" min="10" max="60" step="5"></label>
+<script src="settings.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>

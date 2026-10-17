@@ -1,0 +1,45 @@
+/* Everything is scoped to html.skytree-on so switching off restores Bluesky. */
+html.skytree-on,
+html.skytree-on body,
+html.skytree-on #root {
+  background: transparent !important;
+}
+
+#skytree-frame,
+#skytree-veil,
+#skytree-glass {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: -1;
+  border: 0;
+  pointer-events: none;
+}
+
+#skytree-frame {
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+}
+
+#skytree-veil {
+  left: 0;
+  right: 0;
+}
+
+#skytree-glass {
+  left: calc(50% - 300px);
+  width: 600px;
+}
+
+/* The side columns (nav, search, trending) sit straight on the forest: give
+   all text a soft halo in the page colour so it stays readable. Inside the
+   feed panel the halo matches the panel and doesn't show. */
+html.skytree-on #root {
+  text-shadow: 0 0 2px var(--skytree-bg), 0 0 6px var(--skytree-bg);
+}
+
+html.skytree-on #root svg {
+  filter: drop-shadow(0 0 2px var(--skytree-bg));
+}
