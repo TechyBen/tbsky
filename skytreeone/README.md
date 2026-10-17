@@ -33,7 +33,7 @@ Then in Chrome or Edge, open `chrome://extensions`, turn on **Developer mode**, 
 - Bluesky paints its page colour inline on many nested panels. Each panel whose colour equals the page colour is made transparent, plus the navigation screens' near-black backdrop. A `MutationObserver` keeps up as you scroll and navigate. Fixed overlays like the image viewer are left alone.
 - A translucent, blurred panel in the page colour sits behind the feed column, and a faint veil (stronger on the light theme) plus a soft text halo keeps the side columns readable.
 - `build.py` copies `web/` (playtreeone, a git submodule) into the extension. Extensions can't load code from a CDN, so three.js and lil-gui are vendored in `vendor/` and the bare imports are rewritten to local paths.
-- Nothing is sent anywhere: no login, no account access, no analytics. Live weather is off.
+- Nothing is sent anywhere: no login, no account access, no analytics. Live weather is off. See [PRIVACY.md](PRIVACY.md).
 
 After changing playtreeone: `git submodule update --remote web`, then `python build.py`.
 
