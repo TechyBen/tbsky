@@ -2,6 +2,8 @@
 
 A browser extension that puts the [playtreeone](https://github.com/TechyBen/playtreeone) PS1-style forest behind [Bluesky](https://bsky.app). The scenes, sun, moon, stars and fog are the same as the treeps1 screensaver, rendered quietly behind your feed. Sound is off by default.
 
+New posts from the people you follow arrive as little pixel birds that settle in the trees. Press **Alt+Shift+W** (or **Wander** in the popup) to step into the forest: walk up to a bird to read its post, press **Enter** to open the thread, or **Esc** to go back to your feed.
+
 ![The dark theme over a forest](docs/dark.png)
 
 ## Install (unpacked)
@@ -19,6 +21,8 @@ Then in Chrome or Edge, open `chrome://extensions`, turn on **Developer mode**, 
 | Setting | Default | |
 |---|---|---|
 | Forest behind Bluesky | on | Switching off restores Bluesky exactly |
+| Birds from people I follow | on | Live posts land in the trees as birds |
+| Whose follows | blank | Blank uses the account signed in to bsky.app; type a handle to use someone else's follows |
 | Sound | off | Wind and birds. Browsers only start audio after a click, so it starts on your next click on Bluesky, and pauses while the tab is hidden |
 | Volume | 40% | |
 | Feed panel | 70% | Opacity of the blurred panel behind the feed |
@@ -27,13 +31,26 @@ Then in Chrome or Edge, open `chrome://extensions`, turn on **Developer mode**, 
 | Pixel height | 240 | Render height; lower is chunkier and lighter on the GPU |
 | Frame cap | 30 fps | |
 
+## Wander mode
+
+| Key | |
+|---|---|
+| Alt+Shift+W | Step into the forest, or back out |
+| W A S D | Walk and step sideways (Shift to run) |
+| Arrow keys | Walk and turn |
+| Drag | Look around |
+| Enter | Open the post of the bird in front of you |
+| Esc | Back to the feed |
+
 ## How it works
 
 - `ext/content.js` adds a fixed, click-through `<iframe>` under everything on bsky.app. It loads the extension's own copy of the playtreeone page in screensaver mode (`tree/index.html?saver&audio=0…`).
 - Bluesky paints its page colour inline on many nested panels. A stylesheet rule with `!important` makes every panel with that inline colour transparent, plus the navigation screens' near-white or near-black backdrop. Being CSS, it applies before the browser paints, so re-rendered panels never flash. Sticky and fixed bars (the tab bar, the bottom bar) keep a frosted backdrop instead. Fixed overlays like the image viewer are left alone.
 - A translucent, blurred panel in the page colour sits behind the feed column, and a faint veil (stronger on the light theme) plus a soft text halo keeps the side columns readable.
 - `build.py` copies `web/` (playtreeone, a git submodule) into the extension. Extensions can't load code from a CDN, so three.js and lil-gui are vendored in `vendor/` and the bare imports are rewritten to local paths.
-- Nothing is sent anywhere: no login, no account access, no analytics. Live weather is off. See [PRIVACY.md](PRIVACY.md).
+- `ext/tree/chatter.js` runs inside the forest page. It gets your follow list from Bluesky's public API (`app.bsky.graph.getFollows`, cached for six hours) and listens to [Jetstream](https://github.com/bluesky-social/jetstream), Bluesky's public JSON firehose, filtered to those accounts (sent in an `options_update` message, so it works for up to 10,000 follows). It replays the last 20 minutes on start so the trees aren't empty. Each top-level post becomes a bird: a camera-facing pixel sprite, coloured per account, lit and fogged like the forest and glowing a little at night. If sound is on, each account also gets its own synthesised birdsong voice when its bird lands.
+- Wander mode fades Bluesky out and gives the forest the keyboard and mouse. Opening a post sends its address back to the page, which navigates Bluesky's own router to the thread without reloading.
+- No login, no account access, no analytics, no servers of its own. Live weather is off. See [PRIVACY.md](PRIVACY.md).
 
 After changing playtreeone: `git submodule update --remote web`, then `python build.py`.
 

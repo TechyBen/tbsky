@@ -34,7 +34,8 @@ def main():
         shutil.rmtree(OUT)
     shutil.copytree(EXT, OUT)
 
-    # tree/: the playtreeone page, without its CDN import map, plus the bridge.
+    # tree/: the playtreeone page, without its CDN import map, plus our own
+    # modules from ext/tree (already copied): the audio bridge and the chatter.
     tree = OUT / 'tree'
     (tree / 'src').mkdir(parents=True)
     for js in (WEB / 'src').glob('*.js'):
@@ -45,9 +46,9 @@ def main():
         raise SystemExit('index.html: import map not found')
     html = html.replace('<script type="module" src="src/main.js"></script>',
                         '<script type="module" src="src/main.js"></script>\n'
-                        '<script type="module" src="bridge.js"></script>')
+                        '<script type="module" src="bridge.js"></script>\n'
+                        '<script type="module" src="chatter.js"></script>')
     (tree / 'index.html').write_text(html, 'utf-8')
-    shutil.move(OUT / 'bridge.js', tree / 'bridge.js')
 
     vendor = tree / 'vendor'
     vendor.mkdir()

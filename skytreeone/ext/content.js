@@ -5,6 +5,9 @@
 //    stylesheet rule makes every panel with that inline colour transparent
 //  - one translucent, blurred panel sits behind the feed column so posts stay
 //    readable over the trees
+//  - wander mode (Alt+Shift+W, or the popup) fades Bluesky out and hands the
+//    keyboard and mouse to the forest; birds there are posts from the people
+//    you follow, and opening one comes back here to its thread
 (() => {
   if (window.__skytree) return;
   window.__skytree = true;
@@ -15,15 +18,17 @@
   const ORIGIN = new URL(BASE).origin;
 
   let cfg = { ...SKYTREE_DEFAULTS };
-  let frame = null, veil = null, glass = null, observer = null, timer = 0;
-  let themeBg = '', audioWanted = false;
+  let frame = null, veil = null, glass = null, observer = null, timer = 0, accountTimer = 0;
+  let themeBg = '', audioWanted = false, wandering = false;
   const html = document.documentElement;
 
   // --- forest iframe ---------------------------------------------------------
   function treeUrl() {
+    const who = me();
     const q = new URLSearchParams({
       saver: '', audio: cfg.sound ? 1 : 0, vol: cfg.vol, mins: cfg.mins,
       px: cfg.px, fps: cfg.fps, realsun: 1, weather: 0,
+      chatter: cfg.chatter && who ? 1 : 0, me: cfg.chatter ? who : '', parent: location.origin,
     });
     return `${BASE}?${q.toString().replace('saver=', 'saver')}`;
   }
@@ -47,6 +52,68 @@
   }
 
   function post(msg) { frame?.contentWindow?.postMessage(msg, ORIGIN); }
+
+  // --- who's signed in -------------------------------------------------------
+  // Whose follows become birds: the handle typed in the popup, else the
+  // signed-in account. Bluesky keeps its session in localStorage; only the
+  // account's DID is taken from it, and nothing is stored or sent elsewhere.
+  function signedInDid() {
+    try {
+      return JSON.parse(localStorage.getItem('BSKY_STORAGE'))?.session?.currentAccount?.did || '';
+    } catch {
+      return '';
+    }
+  }
+  function me() {
+    return (cfg.handle || '').trim().replace(/^@/, '') || signedInDid();
+  }
+
+  // --- wander ----------------------------------------------------------------
+  function setWander(on) {
+    if (!frame || on === wandering) return;
+    wandering = on;
+    html.classList.toggle('skytree-wander', on);
+    frame.tabIndex = on ? 0 : -1;
+    frame.setAttribute('aria-hidden', on ? 'false' : 'true');
+    if (on) {
+      frame.focus();
+      post('skytree:wander');
+    } else {
+      post('skytree:calm');
+      frame.blur();
+      window.focus();
+    }
+  }
+
+  function onKey(e) {
+    if (e.altKey && e.shiftKey && e.code === 'KeyW') {
+      e.preventDefault();
+      e.stopPropagation();
+      setWander(!wandering);
+    }
+  }
+
+  function onFrameMessage(e) {
+    if (!frame || e.source !== frame.contentWindow || e.origin !== ORIGIN) return;
+    const m = e.data;
+    if (m?.type === 'skytree:leave') setWander(false);
+    else if (m?.type === 'skytree:open' && /^did:[a-z]+:[\w.:%-]+$/.test(m.did) && /^[\w.~:-]+$/.test(m.rkey)) {
+      setWander(false);
+      openThread(m.did, m.rkey);
+    }
+  }
+
+  // Bluesky's router follows history changes, so a pushState plus a popstate
+  // opens the thread without reloading the page (or the forest).
+  function openThread(did, rkey) {
+    history.pushState(null, '', `/profile/${did}/post/${rkey}`);
+    dispatchEvent(new PopStateEvent('popstate', { state: null }));
+  }
+
+  // Signing in or out changes whose follows to listen to.
+  function checkAccount() {
+    if (frame && frame.src !== treeUrl()) mountFrame();
+  }
 
   // Browsers only start audio after a user gesture; the iframe never gets one
   // (it's click-through), so forward the first click or key on Bluesky.
@@ -188,6 +255,9 @@
       observer = new MutationObserver(onMutations);
       observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
       timer = setInterval(placeGlass, 500);
+      accountTimer = setInterval(checkAccount, 5000);
+      addEventListener('keydown', onKey, true);
+      addEventListener('message', onFrameMessage);
       addEventListener('resize', placeGlass);
       addEventListener('pointerdown', onGesture, true);
       addEventListener('keydown', onGesture, true);
@@ -196,8 +266,12 @@
   }
 
   function stop() {
+    setWander(false);
     observer?.disconnect(); observer = null;
     clearInterval(timer);
+    clearInterval(accountTimer);
+    removeEventListener('keydown', onKey, true);
+    removeEventListener('message', onFrameMessage);
     removeEventListener('resize', placeGlass);
     removeEventListener('pointerdown', onGesture, true);
     removeEventListener('keydown', onGesture, true);
@@ -220,6 +294,12 @@
 
   if (ext) {
     ext.storage.sync.get(SKYTREE_DEFAULTS).then(c => { cfg = c; apply(); });
+    // The popup's Wander button.
+    ext.runtime.onMessage.addListener((msg, _sender, reply) => {
+      if (msg !== 'skytree:wander') return;
+      setWander(cfg.enabled);
+      reply(cfg.enabled);
+    });
     ext.storage.onChanged.addListener((changes, area) => {
       if (area !== 'sync') return;
       for (const k in changes) cfg[k] = changes[k].newValue;
@@ -228,6 +308,6 @@
   } else {
     Object.assign(cfg, window.SKYTREE_TEST_CFG || {});
     apply();
-    window.__skytreeTest = { stop, apply: c => { Object.assign(cfg, c); apply(Object.keys(c)); } };
+    window.__skytreeTest = { stop, setWander, openThread, apply: c => { Object.assign(cfg, c); apply(Object.keys(c)); } };
   }
 })();

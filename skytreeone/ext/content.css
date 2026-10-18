@@ -50,3 +50,25 @@ html.skytree-on #root {
 html.skytree-on #root svg {
   filter: drop-shadow(0 0 2px var(--skytree-bg));
 }
+
+/* Wander mode: Bluesky fades out and the forest takes the mouse and keyboard. */
+html.skytree-on #root,
+#skytree-veil,
+#skytree-glass {
+  transition: opacity 0.5s;
+}
+
+html.skytree-wander #root {
+  opacity: 0;
+  pointer-events: none;
+}
+
+html.skytree-wander #skytree-veil,
+html.skytree-wander #skytree-glass {
+  opacity: 0;
+}
+
+html.skytree-wander #skytree-frame {
+  z-index: 2147483647;
+  pointer-events: auto;
+}

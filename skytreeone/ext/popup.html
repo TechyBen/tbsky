@@ -15,6 +15,12 @@
   input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
   output { color: var(--dim); font-variant-numeric: tabular-nums; }
   .note { color: var(--dim); font-size: 11px; margin: -6px 0 8px 22px; }
+  input[type="text"] { grid-column: 1 / -1; width: 100%; box-sizing: border-box; padding: 5px 8px; border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--dim) 45%, transparent); background: transparent; color: inherit; font: inherit; }
+  button { width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: var(--accent); color: var(--bg);
+    font: inherit; font-weight: 650; cursor: pointer; }
+  button:hover { filter: brightness(1.08); }
+  kbd { font: 11px ui-monospace, Consolas, monospace; padding: 0 4px; border: 1px solid color-mix(in srgb, var(--dim) 50%, transparent); border-radius: 4px; }
   hr { border: 0; border-top: 1px solid color-mix(in srgb, var(--dim) 30%, transparent); margin: 12px 0; }
 </style>
 </head>
@@ -24,6 +30,12 @@
 <label class="check"><input type="checkbox" id="sound"> Sound</label>
 <div class="note">Starts after your next click on Bluesky.</div>
 <label>Volume <output for="vol"></output><input type="range" id="vol" min="0" max="100" step="5"></label>
+<hr>
+<button id="wander">Wander in the forest</button>
+<div class="note" style="margin: 6px 0 0; text-align: center;" id="wander-note"><kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> on bsky.app · <kbd>Esc</kbd> to return</div>
+<label class="check"><input type="checkbox" id="chatter"> Birds from people I follow</label>
+<div class="note">New posts land in the trees. Walk up to one to read it; <kbd>Enter</kbd> opens the thread.</div>
+<label>Whose follows<input type="text" id="handle" placeholder="the account signed in to bsky.app" spellcheck="false"></label>
 <hr>
 <label>Feed panel <output for="glass"></output><input type="range" id="glass" min="0" max="100" step="5"></label>
 <label>Blur <output for="blur"></output><input type="range" id="blur" min="0" max="20" step="1"></label>
