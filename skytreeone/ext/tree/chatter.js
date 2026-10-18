@@ -667,8 +667,9 @@ addEventListener('keydown', e => {
   if (e.code === 'Enter' && selected) {
     e.preventDefault();
     const { did, rkey } = selected.post;
+    const handle = follows?.people[did]?.[0] || '';
     setWander(false);
-    parent.postMessage({ type: 'skytree:open', did, rkey }, PARENT);
+    parent.postMessage({ type: 'skytree:open', did, rkey, handle }, PARENT);
     return;
   }
   if (MOVE.has(e.code)) { keys.add(e.code); e.preventDefault(); e.stopImmediatePropagation(); }

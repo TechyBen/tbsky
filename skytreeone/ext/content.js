@@ -172,15 +172,82 @@
     } else if (m?.type === 'skytree:leave') setWander(false);
     else if (m?.type === 'skytree:open' && /^did:[a-z]+:[\w.:%-]+$/.test(m.did) && /^[\w.~:-]+$/.test(m.rkey)) {
       setWander(false);
-      openThread(m.did, m.rkey);
+      openThread(m.did, m.rkey, typeof m.handle === 'string' ? m.handle : '');
     }
   }
 
-  // Bluesky's router follows history changes, so a pushState plus a popstate
-  // opens the thread without reloading the page (or the forest).
-  function openThread(did, rkey) {
-    history.pushState(null, '', `/profile/${did}/post/${rkey}`);
+  // Opening a bird's post. Bluesky's router follows history changes, so a
+  // pushState plus a popstate opens the thread without reloading the page (or
+  // the forest). Bluesky stays hidden while the thread loads; once the post
+  // itself is on the page, the page fades in showing it, and the replies below
+  // fade in one by one as they scroll into view.
+  let thread = null;
+  function openThread(did, rkey, handle) {
+    endThread();
+    const path = `/profile/${did}/post/${rkey}`;
+    html.classList.add('skytree-opening');
+    history.pushState(null, '', path);
     dispatchEvent(new PopStateEvent('popstate', { state: null }));
+    const t0 = Date.now();
+    thread = { path, timer: 0, io: null, mo: null };
+    thread.timer = setInterval(() => {
+      const anchor = findAnchor(handle);
+      if (anchor || Date.now() - t0 > 6000) {
+        clearInterval(thread.timer);
+        reveal(anchor);
+      }
+    }, 100);
+  }
+
+  // The post itself: the thread item with the expanded counts (only the
+  // focused post has them), else the first item by its author.
+  function findAnchor(handle) {
+    const items = [...document.querySelectorAll('[data-testid^="postThreadItem-by-"]')];
+    return items.find(e => e.querySelector('[data-testid$="-expanded"]')) ||
+      items.find(e => e.dataset.testid === `postThreadItem-by-${handle}`) || null;
+  }
+
+  function reveal(anchor) {
+    if (anchor) {
+      // Replies (items after the post) wait, then fade in as they scroll in.
+      const io = new IntersectionObserver(entries => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          e.target.setAttribute('data-skytree-seen', '');
+          io.unobserve(e.target);
+        }
+      }, { threshold: 0.05 });
+      const mark = el => {
+        if (el.hasAttribute('data-skytree-reply') || !(anchor.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) return;
+        el.setAttribute('data-skytree-reply', '');
+        io.observe(el);
+      };
+      document.querySelectorAll('[data-testid^="postThreadItem-by-"]').forEach(mark);
+      // More replies load as you scroll.
+      const mo = new MutationObserver(() => document.querySelectorAll('[data-testid^="postThreadItem-by-"]:not([data-skytree-reply])').forEach(mark));
+      mo.observe(document.body, { childList: true, subtree: true });
+      thread.io = io;
+      thread.mo = mo;
+    }
+    requestAnimationFrame(() => html.classList.remove('skytree-opening'));
+  }
+
+  function endThread() {
+    if (!thread) return;
+    clearInterval(thread.timer);
+    thread.io?.disconnect();
+    thread.mo?.disconnect();
+    document.querySelectorAll('[data-skytree-reply]').forEach(el => {
+      el.removeAttribute('data-skytree-reply');
+      el.removeAttribute('data-skytree-seen');
+    });
+    html.classList.remove('skytree-opening');
+    thread = null;
+  }
+
+  // Leaving the thread (back, another link) ends the reply fading.
+  function checkThread() {
+    if (thread && location.pathname !== thread.path) endThread();
   }
 
   // Signing in or out changes whose follows to listen to.
@@ -308,6 +375,7 @@
   // The feed column: the tallest panel with Bluesky's 600px max width.
   function placeGlass() {
     placeButton();
+    checkThread();
     if (!glass) return;
     let best = null, bh = 0;
     for (const el of document.querySelectorAll('[style*="max-width: 600px"]')) {
@@ -362,6 +430,7 @@
     document.querySelectorAll('[data-skytree-bar]').forEach(el => el.removeAttribute('data-skytree-bar'));
     clearTimeout(readyTimer);
     clearTimeout(retryTimer);
+    endThread();
     html.classList.remove('skytree-on', 'skytree-ready');
     themeBg = ''; audioWanted = false;
   }

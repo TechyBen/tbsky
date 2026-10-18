@@ -66,7 +66,25 @@ html.skytree-on #root svg {
 html.skytree-on #root,
 #skytree-veil,
 #skytree-glass {
-  transition: opacity 0.5s;
+  transition: opacity 0.8s ease;
+}
+
+/* Opening a bird's post: Bluesky stays hidden until the post is on the page,
+   then fades in (the transition above). */
+html.skytree-opening #root {
+  opacity: 0 !important;
+  pointer-events: none;
+  transition: none;
+}
+
+/* The replies under it fade in as they scroll into view. */
+html.skytree-on [data-skytree-reply] {
+  opacity: 0;
+  transition: opacity 1.2s ease;
+}
+
+html.skytree-on [data-skytree-reply][data-skytree-seen] {
+  opacity: 1;
 }
 
 html.skytree-wander #root {
