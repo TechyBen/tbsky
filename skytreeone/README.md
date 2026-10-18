@@ -30,7 +30,7 @@ Then in Chrome or Edge, open `chrome://extensions`, turn on **Developer mode**, 
 ## How it works
 
 - `ext/content.js` adds a fixed, click-through `<iframe>` under everything on bsky.app. It loads the extension's own copy of the playtreeone page in screensaver mode (`tree/index.html?saver&audio=0…`).
-- Bluesky paints its page colour inline on many nested panels. Each panel whose colour equals the page colour is made transparent, plus the navigation screens' near-black backdrop. A `MutationObserver` keeps up as you scroll and navigate. Fixed overlays like the image viewer are left alone.
+- Bluesky paints its page colour inline on many nested panels. A stylesheet rule with `!important` makes every panel with that inline colour transparent, plus the navigation screens' near-white or near-black backdrop. Being CSS, it applies before the browser paints, so re-rendered panels never flash. Sticky and fixed bars (the tab bar, the bottom bar) keep a frosted backdrop instead. Fixed overlays like the image viewer are left alone.
 - A translucent, blurred panel in the page colour sits behind the feed column, and a faint veil (stronger on the light theme) plus a soft text halo keeps the side columns readable.
 - `build.py` copies `web/` (playtreeone, a git submodule) into the extension. Extensions can't load code from a CDN, so three.js and lil-gui are vendored in `vendor/` and the bare imports are rewritten to local paths.
 - Nothing is sent anywhere: no login, no account access, no analytics. Live weather is off. See [PRIVACY.md](PRIVACY.md).

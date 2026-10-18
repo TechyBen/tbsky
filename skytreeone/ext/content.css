@@ -33,6 +33,13 @@ html.skytree-on #root {
   width: 600px;
 }
 
+/* Sticky and fixed bars (tab bar, bottom bar) stay frosted. More specific
+   than the page-colour rule that content.js writes. */
+html.skytree-on #root [data-skytree-bar][style] {
+  background-color: var(--skytree-bar) !important;
+  backdrop-filter: blur(10px);
+}
+
 /* The side columns (nav, search, trending) sit straight on the forest: give
    all text a soft halo in the page colour so it stays readable. Inside the
    feed panel the halo matches the panel and doesn't show. */

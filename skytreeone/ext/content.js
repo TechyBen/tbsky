@@ -1,8 +1,8 @@
 // Puts the forest behind bsky.app.
 //  - a fixed, click-through iframe (the extension's tree/ page in saver mode)
 //    sits under everything
-//  - Bluesky paints its page colour inline on many nested panels; every panel
-//    whose inline colour equals the page colour is made transparent
+//  - Bluesky paints its page colour inline on many nested panels; a
+//    stylesheet rule makes every panel with that inline colour transparent
 //  - one translucent, blurred panel sits behind the feed column so posts stay
 //    readable over the trees
 (() => {
@@ -61,38 +61,43 @@
   }
 
   // --- see-through Bluesky ---------------------------------------------------
+  // A stylesheet rule with !important beats Bluesky's inline colours, and it
+  // applies before the browser paints, so panels that Bluesky re-renders (on
+  // scroll, hover, navigation) never flash opaque. The rule is rewritten when
+  // the theme changes.
   const rootPanel = () => document.querySelector('#root [style*="min-height: 100dvh"]');
-  let pageBg = '';
+  let pageBg = '', rules = null;
+  const screens = new Set();
+  let checked = new WeakSet();  // elements already measured, so each is measured once
 
-  // The page colour: Bluesky's full-height outer panel, as Bluesky set it (not
-  // as we did). Before that panel exists, the page's own background.
+  // The page colour: Bluesky's full-height outer panel. Before that panel
+  // exists, the page's own background.
   function readTheme() {
-    const el = rootPanel();
-    if (!el) return pageBg;
-    const s = el.style;
-    return s.getPropertyPriority('background-color') === 'important'
-      ? el.dataset.skytreeBg || '' : s.backgroundColor;
+    return rootPanel()?.style.backgroundColor || pageBg;
   }
 
-  function fix(el) {
-    const s = el.style;
-    if (!s.backgroundColor) return;
-    if (s.getPropertyPriority('background-color') === 'important') {
-      // Ours. If the theme changed under it, put Bluesky's colour back.
-      if (el.dataset.skytreeBg && el.dataset.skytreeBg !== themeBg) unfix(el);
-      return;
+  function writeRules() {
+    if (!rules) {
+      rules = document.createElement('style');
+      rules.id = 'skytree-rules';
+      document.head.append(rules);
     }
-    if (s.backgroundColor !== themeBg && !isScreen(el)) return;
-    el.dataset.skytreeBg = s.backgroundColor;
-    s.setProperty('background-color', 'transparent', 'important');
+    const sel = [];
+    if (themeBg) sel.push(`html.skytree-on #root [style*="background-color: ${themeBg};"]`);
+    for (const st of screens) sel.push(`html.skytree-on main [style="${CSS.escape(st)}"]`);
+    rules.textContent = sel.length ? `${sel.join(',\n')} { background-color: transparent !important; }` : '';
   }
 
   // Navigation screens paint their own backdrop in a colour close to the page
   // colour (rgb(1, 1, 1) on the dim theme): an absolute panel inside <main>
-  // that fills its parent. Fixed overlays (image lightbox) are left alone.
+  // that fills its parent. Its exact inline style becomes a rule too, so later
+  // screens are clear from their first frame. Fixed overlays (the image
+  // viewer) are left alone.
   function isScreen(el) {
-    if (!el.closest('main') || !near(el.style.backgroundColor, themeBg)) return false;
-    if (getComputedStyle(el).position !== 'absolute') return false;
+    if (!near(el.style.backgroundColor, themeBg)) return false;
+    // Hover highlights are absolute too, but click-through.
+    const cs = getComputedStyle(el);
+    if (cs.position !== 'absolute' || cs.pointerEvents === 'none') return false;
     const r = el.getBoundingClientRect(), p = el.parentElement?.getBoundingClientRect();
     return !!p && r.width >= p.width * 0.95 && r.height >= p.height * 0.95;
   }
@@ -102,34 +107,35 @@
     return !!x && !!y && x.length === 3 && [0, 1, 2].every(i => Math.abs(x[i] - y[i]) <= 40);
   }
 
-  function unfix(el) {
-    el.style.setProperty('background-color', el.dataset.skytreeBg);
-    delete el.dataset.skytreeBg;
-  }
-
-  function sweep(root = document) {
+  function sweep() {
     const t = readTheme();
-    if (t && t !== themeBg) { themeBg = t; paintGlass(); }
+    let dirty = false;
+    if (t && t !== themeBg) { themeBg = t; screens.clear(); checked = new WeakSet(); dirty = true; paintGlass(); }
     if (!themeBg) return;
-    if (root.nodeType === 1 && root.hasAttribute('style')) fix(root);
-    root.querySelectorAll('[style*="background-color"]').forEach(fix);
+    for (const el of document.querySelectorAll('#root [style*="background-color"]')) {
+      if (checked.has(el)) continue;
+      checked.add(el);
+      if (el.style.backgroundColor === themeBg) {
+        // Sticky and fixed bars (tab bar, bottom bar) keep a frosted backdrop
+        // so posts scrolling under them don't show through.
+        const pos = getComputedStyle(el).position;
+        if (pos === 'sticky' || pos === 'fixed') el.setAttribute('data-skytree-bar', '');
+        continue;
+      }
+      const st = el.getAttribute('style');
+      if (screens.has(st) || !el.closest('main') || !isScreen(el)) continue;
+      screens.add(st);
+      dirty = true;
+    }
+    if (dirty || !rules) writeRules();
   }
 
-  let pending = new Set(), queued = false;
-  function onMutations(list) {
-    for (const m of list) {
-      if (m.type === 'attributes') pending.add(m.target);
-      else m.addedNodes.forEach(n => n.nodeType === 1 && pending.add(n));
-    }
-    if (!queued) {
-      queued = true;
-      requestAnimationFrame(() => {
-        queued = false;
-        const batch = pending; pending = new Set();
-        if (batch.size > 400) sweep();
-        else batch.forEach(n => n.isConnected && sweep(n));
-      });
-    }
+  // New screens and theme changes are rare, so a check per frame at most.
+  let queued = false;
+  function onMutations() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; sweep(); });
   }
 
   // --- glass behind the feed -------------------------------------------------
@@ -151,7 +157,8 @@
     veil.style.background = rgba(bg, luma(bg) > 0.5 ? 0.45 : 0.12);
     glass.style.background = rgba(bg, cfg.glass / 100);
     glass.style.backdropFilter = cfg.blur ? `blur(${cfg.blur}px)` : 'none';
-    html.style.setProperty('--skytree-bg', themeBg || 'rgb(0,0,0)');
+    html.style.setProperty('--skytree-bg', bg);
+    html.style.setProperty('--skytree-bar', rgba(bg, Math.max(0.85, cfg.glass / 100)));
   }
 
   // The feed column: the tallest panel with Bluesky's 600px max width.
@@ -196,7 +203,8 @@
     removeEventListener('keydown', onGesture, true);
     document.removeEventListener('visibilitychange', onVisibility);
     frame?.remove(); veil?.remove(); glass?.remove(); frame = veil = glass = null;
-    document.querySelectorAll('[data-skytree-bg]').forEach(unfix);
+    rules?.remove(); rules = null; screens.clear(); checked = new WeakSet();
+    document.querySelectorAll('[data-skytree-bar]').forEach(el => el.removeAttribute('data-skytree-bar'));
     html.classList.remove('skytree-on');
     themeBg = ''; audioWanted = false;
   }
