@@ -15,4 +15,4 @@ const SKYTREE_DEFAULTS = {
 
 // Settings that change the forest page itself (the rest only restyle Bluesky).
 // eslint-disable-next-line no-unused-vars
-const SKYTREE_RELOAD = ['enabled', 'sound', 'vol', 'mins', 'px', 'fps', 'chatter', 'handle'];
+const SKYTREE_RELOAD = ['enabled', 'mins', 'px', 'fps', 'chatter', 'handle'];

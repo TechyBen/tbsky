@@ -26,7 +26,8 @@
   function treeUrl() {
     const who = me();
     const q = new URLSearchParams({
-      saver: '', audio: cfg.sound ? 1 : 0, vol: cfg.vol, mins: cfg.mins,
+      // Sound starts off; it's switched live by message (see sendSound).
+      saver: '', audio: 0, mins: cfg.mins,
       px: cfg.px, fps: cfg.fps, realsun: 1, weather: 0,
       chatter: cfg.chatter && who ? 1 : 0, me: cfg.chatter ? who : '', parent: location.origin,
     });
@@ -124,18 +125,30 @@
   }
 
   // Esc in the forest is handled there; this catches it if focus is back on
-  // the page (after clicking the button, say).
+  // the page (after clicking the button or using the popup, say). Any other
+  // key while wandering hands focus back to the forest so walking carries on.
   function onKey(e) {
-    if (wandering && e.code === 'Escape') {
+    if (!wandering) return;
+    if (e.code === 'Escape') {
       e.preventDefault();
       setWander(false);
+    } else {
+      frame.focus();
     }
+  }
+  function onPageFocus() {
+    if (wandering) frame.focus();
   }
 
   function onFrameMessage(e) {
     if (!frame || e.source !== frame.contentWindow || e.origin !== ORIGIN) return;
     const m = e.data;
-    if (m?.type === 'skytree:leave') setWander(false);
+    // The forest (re)loaded: give it the sound setting, and carry on wandering
+    // if we were, so a reload can't leave the page faded out with no walking.
+    if (m?.type === 'skytree:ready') {
+      sendSound();
+      if (wandering) { frame.focus(); post('skytree:wander'); }
+    } else if (m?.type === 'skytree:leave') setWander(false);
     else if (m?.type === 'skytree:open' && /^did:[a-z]+:[\w.:%-]+$/.test(m.did) && /^[\w.~:-]+$/.test(m.rkey)) {
       setWander(false);
       openThread(m.did, m.rkey);
@@ -160,6 +173,10 @@
     if (!cfg.sound) return;
     audioWanted = true;
     post('skytree:resume');
+  }
+  function sendSound() {
+    post({ type: 'skytree:sound', on: cfg.sound, vol: cfg.vol });
+    if (cfg.sound && audioWanted) post('skytree:resume');
   }
   function onVisibility() {
     if (!cfg.sound || !audioWanted) return;
@@ -297,6 +314,7 @@
       timer = setInterval(placeGlass, 500);
       accountTimer = setInterval(checkAccount, 5000);
       addEventListener('keydown', onKey, true);
+      addEventListener('focus', onPageFocus);
       addEventListener('message', onFrameMessage);
       addEventListener('resize', placeGlass);
       addEventListener('pointerdown', onGesture, true);
@@ -311,6 +329,7 @@
     clearInterval(timer);
     clearInterval(accountTimer);
     removeEventListener('keydown', onKey, true);
+    removeEventListener('focus', onPageFocus);
     removeEventListener('message', onFrameMessage);
     removeEventListener('resize', placeGlass);
     removeEventListener('pointerdown', onGesture, true);
@@ -326,9 +345,11 @@
 
   function apply(changed) {
     if (!cfg.enabled) return stop();
-    if (!changed || changed.some(k => SKYTREE_RELOAD.includes(k))) {
-      if (changed?.includes('sound')) audioWanted = false;
-      start();
+    if (!changed || changed.some(k => SKYTREE_RELOAD.includes(k))) start();
+    // Sound and volume change live, without reloading the forest.
+    if (changed?.includes('sound') || changed?.includes('vol')) {
+      if (changed.includes('sound')) audioWanted = false;
+      sendSound();
     }
     paintGlass();
   }

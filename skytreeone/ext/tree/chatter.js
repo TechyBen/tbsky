@@ -519,5 +519,9 @@ api.beforeFrame.push(now => {
   if (wander) updateWander(t, dt);
 });
 
+// Tell the page we're up (it sends the sound setting, and resumes wander
+// mode if the forest was reloaded mid-walk).
+parent.postMessage({ type: 'skytree:ready' }, PARENT);
+
 // For testing from the devtools console.
 window.skytreeChatter = { birds, queue, status: () => status, setWander, arrive, land: p => land(p, last) };
