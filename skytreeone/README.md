@@ -2,7 +2,7 @@
 
 A browser extension that puts the [playtreeone](https://github.com/TechyBen/playtreeone) PS1-style forest behind [Bluesky](https://bsky.app). The scenes, sun, moon, stars and fog are the same as the treeps1 screensaver, rendered quietly behind your feed. Sound is off by default.
 
-New posts from the people you follow arrive as little pixel birds that settle in the trees. Press **Alt+Shift+W** (or **Wander** in the popup) to step into the forest: walk up to a bird to read its post, press **Enter** to open the thread, or **Esc** to go back to your feed.
+New posts from the people you follow arrive as little pixel birds that settle in the trees. Click the little tree button at the bottom right of bsky.app (or **Wander** in the popup) to step into the forest: walk up to a bird to read its post, press **Enter** to open the thread, or **Esc** to go back to your feed.
 
 ![The dark theme over a forest](docs/dark.png)
 
@@ -35,7 +35,7 @@ Then in Chrome or Edge, open `chrome://extensions`, turn on **Developer mode**, 
 
 | Key | |
 |---|---|
-| Alt+Shift+W | Step into the forest, or back out |
+| Tree button | Step into the forest, or back out |
 | W A S D | Walk and step sideways (Shift to run) |
 | Arrow keys | Walk and turn |
 | Drag | Look around |

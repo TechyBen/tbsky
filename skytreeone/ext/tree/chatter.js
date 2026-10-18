@@ -404,7 +404,7 @@ addEventListener('message', e => {
 // Capture phase, so the forest's own WASD walk never sees these keys.
 addEventListener('keydown', e => {
   if (!wander) return;
-  if (e.code === 'Escape' || (e.altKey && e.shiftKey && e.code === 'KeyW')) { e.preventDefault(); leave(); return; }
+  if (e.code === 'Escape') { e.preventDefault(); leave(); return; }
   if (e.code === 'Enter' && selected) {
     e.preventDefault();
     const { did, rkey } = selected.post;

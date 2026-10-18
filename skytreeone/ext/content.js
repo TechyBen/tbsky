@@ -5,7 +5,7 @@
 //    stylesheet rule makes every panel with that inline colour transparent
 //  - one translucent, blurred panel sits behind the feed column so posts stay
 //    readable over the trees
-//  - wander mode (Alt+Shift+W, or the popup) fades Bluesky out and hands the
+//  - wander mode (the tree button, or the popup) fades Bluesky out and hands the
 //    keyboard and mouse to the forest; birds there are posts from the people
 //    you follow, and opening one comes back here to its thread
 (() => {
@@ -18,7 +18,7 @@
   const ORIGIN = new URL(BASE).origin;
 
   let cfg = { ...SKYTREE_DEFAULTS };
-  let frame = null, veil = null, glass = null, observer = null, timer = 0, accountTimer = 0;
+  let frame = null, veil = null, glass = null, button = null, observer = null, timer = 0, accountTimer = 0;
   let themeBg = '', audioWanted = false, wandering = false;
   const html = document.documentElement;
 
@@ -46,6 +46,8 @@
       glass = document.createElement('div');
       glass.id = 'skytree-glass';
       document.body.prepend(frame, veil, glass);
+      button = makeButton();
+      document.body.append(button);
     }
     const url = treeUrl();
     if (frame.src !== url) frame.src = url;
@@ -69,9 +71,45 @@
   }
 
   // --- wander ----------------------------------------------------------------
+  // A pixel fir, drawn as rects: [x, y, width] per row of a 12x12 grid.
+  const FIR = [[5, 0, 2], [4, 1, 4], [3, 2, 6], [4, 3, 4], [2, 4, 8], [1, 5, 10], [3, 6, 6], [1, 7, 10], [0, 8, 12]];
+  function makeButton() {
+    const b = document.createElement('button');
+    b.id = 'skytree-wander-btn';
+    b.type = 'button';
+    const rows = FIR.map(([x, y, w]) => `<rect x="${x}" y="${y}" width="${w}" height="1"/>`).join('');
+    b.innerHTML = `<svg viewBox="0 0 12 11" width="22" height="20" aria-hidden="true" shape-rendering="crispEdges">` +
+      `<g fill="#5aa86e">${rows}</g><rect x="5" y="9" width="2" height="2" fill="#7a5638"/></svg>`;
+    b.addEventListener('click', () => setWander(!wandering));
+    labelButton(b);
+    return b;
+  }
+  function labelButton(b = button) {
+    if (!b) return;
+    const label = wandering ? 'Back to the feed (Esc)' : 'Wander in the forest';
+    b.title = label;
+    b.setAttribute('aria-label', label);
+  }
+
+  // Bottom right, lifted above Bluesky's bottom bar and compose button.
+  function placeButton() {
+    if (!button) return;
+    let lift = 0;
+    if (!wandering) {
+      const h = innerHeight;
+      for (const el of document.querySelectorAll('[data-skytree-bar], [data-testid="composeFAB"]')) {
+        const r = el.getBoundingClientRect();
+        if (r.height && r.top > h / 2 && r.bottom >= h - 40) lift = Math.max(lift, h - r.top);
+      }
+    }
+    button.style.bottom = `${16 + lift}px`;
+  }
+
   function setWander(on) {
     if (!frame || on === wandering) return;
     wandering = on;
+    labelButton();
+    placeButton();
     html.classList.toggle('skytree-wander', on);
     frame.tabIndex = on ? 0 : -1;
     frame.setAttribute('aria-hidden', on ? 'false' : 'true');
@@ -85,11 +123,12 @@
     }
   }
 
+  // Esc in the forest is handled there; this catches it if focus is back on
+  // the page (after clicking the button, say).
   function onKey(e) {
-    if (e.altKey && e.shiftKey && e.code === 'KeyW') {
+    if (wandering && e.code === 'Escape') {
       e.preventDefault();
-      e.stopPropagation();
-      setWander(!wandering);
+      setWander(false);
     }
   }
 
@@ -230,6 +269,7 @@
 
   // The feed column: the tallest panel with Bluesky's 600px max width.
   function placeGlass() {
+    placeButton();
     if (!glass) return;
     let best = null, bh = 0;
     for (const el of document.querySelectorAll('[style*="max-width: 600px"]')) {
@@ -276,7 +316,8 @@
     removeEventListener('pointerdown', onGesture, true);
     removeEventListener('keydown', onGesture, true);
     document.removeEventListener('visibilitychange', onVisibility);
-    frame?.remove(); veil?.remove(); glass?.remove(); frame = veil = glass = null;
+    frame?.remove(); veil?.remove(); glass?.remove(); button?.remove();
+    frame = veil = glass = button = null;
     rules?.remove(); rules = null; screens.clear(); checked = new WeakSet();
     document.querySelectorAll('[data-skytree-bar]').forEach(el => el.removeAttribute('data-skytree-bar'));
     html.classList.remove('skytree-on');
