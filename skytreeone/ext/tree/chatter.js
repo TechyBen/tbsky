@@ -21,6 +21,9 @@ const JETSTREAMS = [
   'jetstream1.us-west.bsky.network', 'jetstream2.us-west.bsky.network',
 ];
 const MAX_BIRDS = 18;          // the oldest flies off when a new one lands
+const FEW = 12;                // fewer birds than this around you: old posts land again
+const POOL = 80;               // posts kept for landing again
+const FAR = 35;                // birds left this far behind fly off
 const STAY = 60 * 60;          // seconds a bird stays perched (unless displaced)
 const REPLAY = 3 * 3600e3;     // on start, replay this much recent chatter
 const FOLLOWS_TTL = 6 * 3600e3;
@@ -108,13 +111,57 @@ function listen(dids, onPost) {
 
 // Arrivals queue up and land one at a time (quickly while the forest is
 // empty), keeping only the newest when a burst comes in.
+// New posts queue to land first. Every post also goes in a pool; when no new
+// ones are waiting and few birds are around you, pool posts land again round
+// robin (least recently shown first), so the forest stays full as you walk and
+// new posts always push old ones to the back.
 const queue = [];
+const pool = new Map(); // did/rkey -> post
 let nextLanding = 0;
 function arrive(post) {
   if (!follows?.people[post.did]) return;
+  post.key = `${post.did}/${post.rkey}`;
+  if (pool.has(post.key)) return;
+  post.mark = marks[post.key] || 0;
+  post.shownAt = 0;
+  pool.set(post.key, post);
+  if (pool.size > POOL) {
+    const oldest = [...pool.values()].filter(p => !onStage(p)).sort((a, b) => a.at - b.at)[0];
+    if (oldest) pool.delete(oldest.key);
+  }
   queue.push(post);
   if (queue.length > MAX_BIRDS) queue.splice(0, queue.length - MAX_BIRDS);
 }
+const onStage = post => birds.some(b => b.post === post && b.state !== 'out');
+function nextFromPool() {
+  let best = null;
+  for (const p of pool.values()) {
+    if (onStage(p) || queue.includes(p)) continue;
+    if (!best || p.shownAt < best.shownAt) best = p;
+  }
+  return best;
+}
+
+// Seen (green outline) and read (blue), remembered between visits.
+const MARK_KEY = 'skytree:marks';
+let marks = {};
+try { marks = JSON.parse(localStorage.getItem(MARK_KEY)) || {}; } catch { /* none yet */ }
+let marksDirty = false;
+function markPost(post, level) {
+  if ((post.mark || 0) >= level) return;
+  post.mark = level;
+  marks[post.key] = level;
+  marksDirty = true;
+  for (const b of birds) if (b.post === post) paintMark(b);
+}
+function saveMarks() {
+  if (!marksDirty) return;
+  marksDirty = false;
+  const keys = Object.keys(marks);
+  if (keys.length > 500) for (const k of keys.slice(0, keys.length - 500)) delete marks[k];
+  try { localStorage.setItem(MARK_KEY, JSON.stringify(marks)); } catch { /* full */ }
+}
+setInterval(saveMarks, 5000);
 
 if (CHATTER) {
   loadFollows(ME)
@@ -257,6 +304,7 @@ const FS = /* glsl */ `
 uniform sampler2D uMap;
 uniform vec2 uCell;  // column (view angle), row (pose)
 uniform float uSel;
+uniform vec4 uMark;  // outline colour (rgb) and strength: seen green, read blue
 uniform float uPass;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
@@ -306,6 +354,7 @@ void main() {
   float dark = 1.0 - clamp(ambL + sunL, 0.0, 1.0);
   vec3 rim = mix(uSunColor, vec3(0.75, 0.8, 0.9), 0.5);
   col += rim * edge * (0.03 + 0.2 * dark * dark);
+  col = mix(col, uMark.rgb, edge * uMark.a);
 
   col += uSel * 0.25;
   float dist = length(vWorld - cameraPosition);
@@ -410,6 +459,7 @@ function land(post, t) {
     uniforms: {
       ...U, uMap: { value: acct.tex }, uCell: { value: new THREE.Vector2(0, 3) },
       uSize: { value: new THREE.Vector2(1, CH / CW) }, uSel: { value: 0 },
+      uMark: { value: new THREE.Vector4(0, 0, 0, 0) },
     },
     vertexShader: VS, fragmentShader: FS,
   });
@@ -423,6 +473,8 @@ function land(post, t) {
     pose: 'up', flap: 0, nextStep: 0, close: 0,
   };
   birds.push(bird);
+  post.shownAt = t;
+  paintMark(bird);
   step(bird, t);
   // Too many: the longest-perched one flies off.
   const perched = birds.filter(x => x.state !== 'out');
@@ -437,6 +489,11 @@ function flyOff(b, t) {
   b.to = b.from.clone().add(new THREE.Vector3(Math.cos(a) * 60, 25, Math.sin(a) * 60));
   b.heading = a;
   step(b, t);
+}
+
+const MARKS = [null, new THREE.Vector4(0.45, 0.9, 0.5, 0.75), new THREE.Vector4(0.45, 0.68, 1, 0.8)];
+function paintMark(b) {
+  b.mat.uniforms.uMark.value.copy(MARKS[b.post.mark || 0] || new THREE.Vector4());
 }
 
 // Startled, or its perch gone: a short flight to another perch nearby (away
@@ -536,12 +593,31 @@ function updateBirds(t, dt) {
       if (b.state === 'perch') b.mesh.position.copy(b.perch).setY(b.perch.y + lift(b));
     }
   }
-  if (queue.length && t >= nextLanding) {
-    land(queue.shift(), t);
-    nextLanding = t + (birds.length < 6 ? 1.5 : 4);
+  if (t >= nextLanding) {
+    const around = birds.filter(b => b.state !== 'out').length;
+    const post = queue.shift() || (around < FEW ? nextFromPool() : null);
+    if (post) {
+      land(post, t);
+      // Refill quickly when the forest around you is thin.
+      nextLanding = t + (around < 6 ? 1 : around < FEW ? 2.5 : 4);
+    }
   }
   for (let i = birds.length - 1; i >= 0; i--) {
     const b = birds[i], m = b.mesh, age = t - b.since;
+    // Left far behind (you walked on): it flies off, and its post can land
+    // again near you later.
+    if (b.state !== 'out' && Math.hypot(b.perch.x - camera.position.x, b.perch.z - camera.position.z) > FAR) {
+      flyOff(b, t);
+      continue;
+    }
+    // Seen: in front of you, within ~14 m, for a second (wander only).
+    if (wander && b.state === 'perch' && !b.post.mark) {
+      tmp.subVectors(b.mesh.position, camera.position);
+      const d = tmp.length();
+      camera.getWorldDirection(right);
+      b.seenFor = d < 14 && tmp.dot(right) / Math.max(d, 1e-3) > 0.75 ? (b.seenFor || 0) + dt : 0;
+      if (b.seenFor > 1) markPost(b.post, 1);
+    }
     if (b.state === 'in') {
       const k = smooth(age / b.flight);
       m.position.lerpVectors(b.from, tmp.copy(b.perch).setY(b.perch.y + lift(b)), k);
@@ -618,8 +694,14 @@ function ago(ms) {
   return `${Math.floor(s / 3600)}h`;
 }
 
+let selectedAt = 0;
 function select(b) {
-  if (b === selected) return;
+  if (b === selected) {
+    // Read: its card has been open for a moment.
+    if (b && performance.now() - selectedAt > 1200) markPost(b.post, 2);
+    return;
+  }
+  selectedAt = performance.now();
   if (selected) selected.mat.uniforms.uSel.value = 0;
   selected = b;
   card.classList.toggle('on', !!b);
@@ -668,6 +750,8 @@ addEventListener('keydown', e => {
     e.preventDefault();
     const { did, rkey } = selected.post;
     const handle = follows?.people[did]?.[0] || '';
+    markPost(selected.post, 2);
+    saveMarks();
     setWander(false);
     parent.postMessage({ type: 'skytree:open', did, rkey, handle }, PARENT);
     return;
@@ -744,6 +828,6 @@ api.beforeFrame.push(now => {
 parent.postMessage({ type: 'skytree:ready' }, PARENT);
 
 // For testing from the devtools console.
-window.skytreeChatter = { birds, queue, status: () => status, setWander, arrive, land: p => land(p, last), perches, relocate: b => relocate(b, last, camera.position),
+window.skytreeChatter = { birds, queue, status: () => status, setWander, arrive, land: p => land(p, last), perches, relocate: b => relocate(b, last, camera.position), markPost,
   // Stand at (x, z) in wander mode, looking at point p.
   stand: (x, z, p) => { pos.set(x, 0, z); yaw = Math.atan2(p.z - z, p.x - x); pitch = Math.atan2(p.y - (api.terrainHeight(x, z) + EYE), Math.hypot(p.x - x, p.z - z)); } };
