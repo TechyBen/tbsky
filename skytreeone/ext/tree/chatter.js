@@ -21,8 +21,8 @@ const JETSTREAMS = [
   'jetstream1.us-west.bsky.network', 'jetstream2.us-west.bsky.network',
 ];
 const MAX_BIRDS = 18;          // the oldest flies off when a new one lands
-const STAY = 8 * 60;           // seconds a bird stays perched
-const REPLAY = 20 * 60e3;      // on start, replay this much recent chatter
+const STAY = 60 * 60;          // seconds a bird stays perched (unless displaced)
+const REPLAY = 3 * 3600e3;     // on start, replay this much recent chatter
 const FOLLOWS_TTL = 6 * 3600e3;
 const MAX_DIDS = 10000;        // Jetstream's limit on wanted DIDs
 const EYE = 1.6, REACH = 3.2;  // eye height and how close you must be to read

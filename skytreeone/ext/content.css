@@ -1,5 +1,10 @@
-/* Everything is scoped to html.skytree-on so switching off restores Bluesky. */
-html.skytree-on,
+/* Everything is scoped to html.skytree-on so switching off restores Bluesky.
+   The page keeps Bluesky's own colour underneath, so it shows (never white)
+   until the forest has loaded. */
+html.skytree-on {
+  background: var(--skytree-bg, transparent) !important;
+}
+
 html.skytree-on body,
 html.skytree-on #root {
   background: transparent !important;
@@ -16,11 +21,17 @@ html.skytree-on #root {
   pointer-events: none;
 }
 
+/* Hidden until it's ready, then a slow, dim fade in. */
 #skytree-frame {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: #000;
+  opacity: 0;
+  transition: opacity 5s ease-in;
+}
+
+html.skytree-ready #skytree-frame {
+  opacity: 1;
 }
 
 #skytree-veil {

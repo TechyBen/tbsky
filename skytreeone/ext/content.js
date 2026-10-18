@@ -20,6 +20,7 @@
   let cfg = { ...SKYTREE_DEFAULTS };
   let frame = null, veil = null, glass = null, button = null, observer = null, timer = 0, accountTimer = 0;
   let themeBg = '', audioWanted = false, wandering = false;
+  let readyTimer = 0, retryTimer = 0, retried = false;
   const html = document.documentElement;
 
   // --- forest iframe ---------------------------------------------------------
@@ -51,7 +52,26 @@
       document.body.append(button);
     }
     const url = treeUrl();
-    if (frame.src !== url) frame.src = url;
+    if (frame.src !== url) load(url);
+  }
+
+  // The forest stays hidden (Bluesky's own colour shows) until it reports
+  // ready, then fades in slowly once its own fade from black is done, so
+  // there's never a white or bright flash. If it hasn't reported in after
+  // 20 s, it's loaded once more.
+  function load(url) {
+    html.classList.remove('skytree-ready');
+    clearTimeout(readyTimer);
+    clearTimeout(retryTimer);
+    frame.src = url;
+    retryTimer = setTimeout(() => {
+      if (frame && !retried) { retried = true; load(frame.src); }
+    }, 20000);
+  }
+  function onReady() {
+    clearTimeout(retryTimer);
+    retried = false;
+    readyTimer = setTimeout(() => html.classList.add('skytree-ready'), 3000);
   }
 
   function post(msg) { frame?.contentWindow?.postMessage(msg, ORIGIN); }
@@ -146,6 +166,7 @@
     // The forest (re)loaded: give it the sound setting, and carry on wandering
     // if we were, so a reload can't leave the page faded out with no walking.
     if (m?.type === 'skytree:ready') {
+      onReady();
       sendSound();
       if (wandering) { frame.focus(); post('skytree:wander'); }
     } else if (m?.type === 'skytree:leave') setWander(false);
@@ -339,7 +360,9 @@
     frame = veil = glass = button = null;
     rules?.remove(); rules = null; screens.clear(); checked = new WeakSet();
     document.querySelectorAll('[data-skytree-bar]').forEach(el => el.removeAttribute('data-skytree-bar'));
-    html.classList.remove('skytree-on');
+    clearTimeout(readyTimer);
+    clearTimeout(retryTimer);
+    html.classList.remove('skytree-on', 'skytree-ready');
     themeBg = ''; audioWanted = false;
   }
 
