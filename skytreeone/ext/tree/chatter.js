@@ -26,6 +26,7 @@ const REPLAY = 3 * 3600e3;     // on start, replay this much recent chatter
 const FOLLOWS_TTL = 6 * 3600e3;
 const MAX_DIDS = 10000;        // Jetstream's limit on wanted DIDs
 const EYE = 1.6, REACH = 3.2;  // eye height and how close you must be to read
+const FLUSH = 1.5, FLUSH_WAIT = 1; // closer than ~2 steps for a second (no Enter): it flies
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
@@ -319,11 +320,89 @@ const quad = new THREE.PlaneGeometry(1, 1);
 const birds = [];
 const tmp = new THREE.Vector3(), right = new THREE.Vector3();
 
+// ---------------------------------------------------------------- perches
+// Birds stand on real parts of the forest: the trees' own side branches (from
+// each tree type's skeleton, placed through every planted copy), the tops of
+// shrubs, or the ground. A branch perch is a fairly level section of a side
+// branch, neither twig nor bough, 1-5 m up, not buried in a leaf
+// cluster; the bird's feet go on top of it.
+// Shrubs are leafy billboards, so a bird just stands on the top of the bush.
+const KINDS = [['branch', 0.65], ['shrub', 0.2], ['ground', 0.15]];
+let perchList = [], perchForest = null;
+
+function perches() {
+  const vs = api.variants();
+  if (vs[0] === perchForest) return perchList;
+  perchForest = vs[0];
+  const out = [], p = new THREE.Vector3();
+  for (const v of vs) {
+    const local = [];
+    if (v.species === 'shrub') {
+      const top = [...v.tree.clusters].sort((a, b) => b.p.y - a.p.y).slice(0, 3);
+      for (const c of top) local.push({ p: c.p.clone().setY(c.p.y + c.size * 0.3), r: 0, kind: 'shrub' });
+    } else {
+      for (const l of v.tree.limbs) {
+        if (l.level < 1) continue;
+        for (let i = 0; i < l.pts.length - 1; i++) {
+          const a = l.pts[i], b = l.pts[i + 1], len = a.distanceTo(b);
+          const r = (l.radii[i] + l.radii[i + 1]) / 2;
+          if (len < 1e-3 || Math.abs(b.y - a.y) / len > 0.55 || r < 0.012 || r > 0.12) continue;
+          const mid = a.clone().lerp(b, 0.5);
+          // Out along the branch (so it shows under the bird), and not buried
+          // in a leaf cluster where the bird couldn't be seen.
+          if (Math.hypot(mid.x, mid.z) < 0.6) continue;
+          if (v.tree.clusters.some(c => c.p.distanceTo(mid) < c.size * 0.55)) continue;
+          local.push({ p: mid, r, kind: 'branch' });
+        }
+      }
+    }
+    for (const inst of v.instances) {
+      for (const c of local) {
+        p.copy(c.p).applyMatrix4(inst.m);
+        if (c.kind === 'branch') {
+          const h = p.y - api.terrainHeight(p.x, p.z);
+          if (h < 1 || h > 5) continue;
+        }
+        out.push({ x: p.x, y: p.y + c.r * inst.scale, z: p.z, kind: c.kind, tx: inst.pos.x, tz: inst.pos.z });
+      }
+    }
+  }
+  perchList = out;
+  return out;
+}
+
+// A free perch between rMin and rMax from (cx, cz), of a kind picked by the
+// weights above (falling back to another kind, then the ground), not too near
+// another bird, and (when `away` is given) not near that point either.
+function pickPerch(cx, cz, rMin, rMax, away = null, keep = null) {
+  const inRing = q => { const d = Math.hypot(q.x - cx, q.z - cz); return d >= rMin && d <= rMax; };
+  const free = q => birds.every(b => b === keep || b.perch.distanceToSquared(new THREE.Vector3(q.x, q.y, q.z)) > 0.36) &&
+    (!away || Math.hypot(q.x - away.x, q.z - away.z) > 3);
+  let roll = Math.random(), want = 'ground';
+  for (const [k, w] of KINDS) { if ((roll -= w) < 0) { want = k; break; } }
+  for (const kind of want === 'ground' ? [] : [want, want === 'branch' ? 'shrub' : 'branch']) {
+    const list = perches().filter(q => q.kind === kind && inRing(q) && free(q));
+    if (list.length) {
+      const q = list[Math.floor(Math.random() * list.length)];
+      return { at: new THREE.Vector3(q.x, q.y, q.z), kind, trunk: [q.tx, q.tz] };
+    }
+  }
+  for (let i = 0; i < 12; i++) {
+    const a = Math.random() * TAU, r = rMin + Math.random() * (rMax - rMin);
+    const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+    const q = { x, y: api.terrainHeight(x, z), z };
+    if (free(q) || i === 11) return { at: new THREE.Vector3(q.x, q.y, q.z), kind: 'ground' };
+  }
+}
+
+// The billboard's centre sits this far above the bird's feet.
+const lift = b => CY * DRAW * b.acct.size;
+
 function land(post, t) {
   const cam = camera.position;
-  const a = Math.random() * TAU, r = 7 + Math.random() * 12;
-  const perch = new THREE.Vector3(cam.x + Math.cos(a) * r, 0, cam.z + Math.sin(a) * r);
-  perch.y = api.terrainHeight(perch.x, perch.z) + 1.2 + Math.random() * 1.4;
+  const spot = pickPerch(cam.x, cam.z, 7, 19);
+  const perch = spot.at;
+  const a = Math.atan2(perch.z - cam.z, perch.x - cam.x);
   const b = a + (Math.random() - 0.5) * 1.4;
   const from = new THREE.Vector3(cam.x + Math.cos(b) * 50, perch.y + 12 + Math.random() * 8, cam.z + Math.sin(b) * 50);
   const acct = account(post.did);
@@ -339,9 +418,9 @@ function land(post, t) {
   mesh.position.copy(from);
   group.add(mesh);
   const bird = {
-    post, acct, mesh, mat, from, perch, to: null, state: 'in', since: t,
-    flight: 7 + Math.random() * 4, heading: Math.atan2(perch.z - from.z, perch.x - from.x),
-    pose: 'up', flap: 0, nextStep: 0,
+    post, acct, mesh, mat, from, perch, kind: spot.kind, trunk: spot.trunk, to: null, state: 'in', since: t,
+    flight: 7 + Math.random() * 4, arc: 3, heading: Math.atan2(perch.z - from.z, perch.x - from.x),
+    pose: 'up', flap: 0, nextStep: 0, close: 0,
   };
   birds.push(bird);
   step(bird, t);
@@ -357,6 +436,24 @@ function flyOff(b, t) {
   b.from = b.mesh.position.clone();
   b.to = b.from.clone().add(new THREE.Vector3(Math.cos(a) * 60, 25, Math.sin(a) * 60));
   b.heading = a;
+  step(b, t);
+}
+
+// Startled, or its perch gone: a short flight to another perch nearby (away
+// from `away`, the walker, when given).
+function relocate(b, t, away = null) {
+  const spot = pickPerch(b.perch.x, b.perch.z, 3, 10, away, b);
+  b.from = b.mesh.position.clone();
+  b.perch = spot.at;
+  b.kind = spot.kind;
+  b.trunk = spot.trunk;
+  b.state = 'in';
+  b.since = t;
+  b.flight = 2.5 + Math.random() * 1.5;
+  b.arc = 1.2;
+  b.close = 0;
+  b.heading = Math.atan2(b.perch.z - b.from.z, b.perch.x - b.from.x);
+  if (b === selected) select(null);
   step(b, t);
 }
 
@@ -380,8 +477,12 @@ function step(b, t) {
     if (r < 0.12 && b !== selected) {
       b.pose = 'hop';
       b.heading = Math.random() * TAU;
-      b.perch.x += Math.cos(b.heading) * 0.3;
-      b.perch.z += Math.sin(b.heading) * 0.3;
+      // On a branch it only turns round; on the ground or a bush it steps.
+      if (b.kind !== 'branch') {
+        b.perch.x += Math.cos(b.heading) * 0.25;
+        b.perch.z += Math.sin(b.heading) * 0.25;
+        if (b.kind === 'ground') b.perch.y = api.terrainHeight(b.perch.x, b.perch.z);
+      }
     } else {
       b.pose = r < 0.4 ? 'look' : 'perch';
     }
@@ -423,6 +524,18 @@ function updateBirds(t, dt) {
     dirty.delete(a);
     if (accounts.has(a.did)) bake(a);
   }
+  // New scene, new trees: birds settle on the new forest (under the fog).
+  const forestNow = api.variants()[0];
+  if (forestNow !== perchForest && birds.length) {
+    perches();
+    for (const b of birds) {
+      if (b.state === 'out') continue;
+      const spot = pickPerch(b.perch.x, b.perch.z, 0, 8, null, b);
+      b.perch = spot.at;
+      b.kind = spot.kind;
+      if (b.state === 'perch') b.mesh.position.copy(b.perch).setY(b.perch.y + lift(b));
+    }
+  }
   if (queue.length && t >= nextLanding) {
     land(queue.shift(), t);
     nextLanding = t + (birds.length < 6 ? 1.5 : 4);
@@ -431,13 +544,18 @@ function updateBirds(t, dt) {
     const b = birds[i], m = b.mesh, age = t - b.since;
     if (b.state === 'in') {
       const k = smooth(age / b.flight);
-      m.position.lerpVectors(b.from, b.perch, k);
-      m.position.y += Math.sin(k * Math.PI) * 3;
+      m.position.lerpVectors(b.from, tmp.copy(b.perch).setY(b.perch.y + lift(b)), k);
+      m.position.y += Math.sin(k * Math.PI) * b.arc;
       if (k >= 1) { b.state = 'perch'; b.since = t; step(b, t); chirp(b); }
     } else if (b.state === 'perch') {
-      m.position.copy(b.perch);
+      m.position.copy(b.perch).setY(b.perch.y + lift(b));
+      const flat = Math.hypot(b.perch.x - camera.position.x, b.perch.z - camera.position.z);
+      // Walk right up to it (about 2 steps) without opening it, and after a
+      // moment it flies off to settle somewhere nearby.
+      b.close = wander && flat < FLUSH ? b.close + dt : 0;
+      if (b.close > FLUSH_WAIT) { relocate(b, t, camera.position); continue; }
       // Stay put while someone is close enough to read.
-      const near = wander && m.position.distanceTo(camera.position) < REACH * 2;
+      const near = wander && flat < REACH * 2;
       if (age > STAY && !near) flyOff(b, t);
     } else {
       const k = smooth(age / 8);
@@ -596,8 +714,9 @@ function updateWander(t, dt) {
   for (const b of birds) {
     if (b.state !== 'perch') continue;
     tmp.subVectors(b.mesh.position, pos);
-    const d = tmp.length();
+    if (Math.abs(tmp.y) > 5) continue;
     tmp.y = 0;
+    const d = tmp.length();
     tmp.normalize();
     if (d < bd && tmp.x * cx + tmp.z * sz > 0.5) { bd = d; best = b; }
   }
@@ -614,8 +733,9 @@ let last = performance.now() / 1000;
 api.beforeFrame.push(now => {
   const t = now / 1000, dt = Math.min(0.1, t - last);
   last = t;
-  if (CHATTER) updateBirds(t, dt);
+  // Wander first, so the birds see where you actually are this frame.
   if (wander) updateWander(t, dt);
+  if (CHATTER) updateBirds(t, dt);
 });
 
 // Tell the page we're up (it sends the sound setting, and resumes wander
@@ -623,4 +743,6 @@ api.beforeFrame.push(now => {
 parent.postMessage({ type: 'skytree:ready' }, PARENT);
 
 // For testing from the devtools console.
-window.skytreeChatter = { birds, queue, status: () => status, setWander, arrive, land: p => land(p, last) };
+window.skytreeChatter = { birds, queue, status: () => status, setWander, arrive, land: p => land(p, last), perches, relocate: b => relocate(b, last, camera.position),
+  // Stand at (x, z) in wander mode, looking at point p.
+  stand: (x, z, p) => { pos.set(x, 0, z); yaw = Math.atan2(p.z - z, p.x - x); pitch = Math.atan2(p.y - (api.terrainHeight(x, z) + EYE), Math.hypot(p.x - x, p.z - z)); } };
