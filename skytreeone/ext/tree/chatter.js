@@ -165,9 +165,12 @@ function textureFor(did) {
   return t;
 }
 
-// Camera-facing quad lit like the forest: ambient + sun, a soft glow when the
-// scene is dark (fireflies at night), the same height fog, and nothing in the
-// shadow pass.
+// Camera-facing quad lit like the forest: the same ambient + sun (or moon)
+// light and the same dappled canopy shadow, so a bird darkens with the time
+// of day and passes through sun and shade. Two touches keep it findable in
+// the dark: it never drops below a dim floor (a little brighter than the
+// trees), and its outline pixels catch a faint rim of the sun or moon light.
+// Nothing in the shadow pass.
 const VS = /* glsl */ `
 uniform float uSize;
 uniform float uFlip;
@@ -185,22 +188,61 @@ uniform sampler2D uMap;
 uniform float uFrame;
 uniform float uSel;
 uniform float uPass;
-uniform vec3 uFogColor;
+uniform vec3 uSunDir;
 uniform vec3 uSunColor;
-uniform vec3 uAmbient;
 uniform float uSunStrength;
+uniform vec3 uAmbient;
+uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform float uFogBase;
 uniform float uFogFalloff;
+uniform sampler2D uShadowMap;
+uniform mat4 uShadowMatrix;
+uniform float uShadowBias;
+uniform float uShadowOn;
 varying vec2 vUv;
 varying vec3 vWorld;
+
+// The forest's own lookup: 1 = lit, 0 = in shadow, single nearest tap.
+float shadowAt(vec3 wp) {
+  if (uShadowOn < 0.5) return 1.0;
+  vec4 sc = uShadowMatrix * vec4(wp, 1.0);
+  vec3 s = sc.xyz / sc.w;
+  if (s.x < 0.0 || s.y < 0.0 || s.x > 1.0 || s.y > 1.0 || s.z > 1.0) return 1.0;
+  return s.z - uShadowBias > texture2D(uShadowMap, s.xy).r ? 0.0 : 1.0;
+}
+
+// Alpha of one sprite pixel in the current frame (outside it = empty).
+float alphaAt(vec2 px) {
+  if (px.x < 0.0 || px.y < 0.0 || px.x > 7.0 || px.y > 7.0) return 0.0;
+  return texture2D(uMap, vec2((px.x + 0.5 + uFrame * 8.0) / 24.0, (px.y + 0.5) / 8.0)).a;
+}
+
 void main() {
   if (uPass > 0.5) discard;
-  vec4 t = texture2D(uMap, vec2((vUv.x + uFrame) / 3.0, vUv.y));
+  vec2 px = floor(vUv * 8.0);
+  vec4 t = texture2D(uMap, vec2((px.x + 0.5 + uFrame * 8.0) / 24.0, (px.y + 0.5) / 8.0));
   if (t.a < 0.5) discard;
-  vec3 light = uAmbient + uSunColor * uSunStrength * 0.7;
+
+  // Sun or moon from above, through the canopy (offset toward the light so
+  // the bird doesn't shadow itself), plus the scene's ambient.
+  float up = 0.6 + 0.4 * max(uSunDir.y, 0.0);
+  float sunT = up * shadowAt(vWorld + uSunDir * 0.4);
+  vec3 light = uAmbient + uSunColor * (uSunStrength * sunT);
+  vec3 col = t.rgb * light * mix(0.85, 1.12, vUv.y); // top pixels face the sky
+
+  // A little brighter than the trees in the dark.
+  col = max(col, t.rgb * 0.16);
+
+  // Outline pixels (next to an empty one) catch a faint rim of light, more
+  // so the darker it is.
+  float edge = 1.0 - min(min(alphaAt(px + vec2(1.0, 0.0)), alphaAt(px - vec2(1.0, 0.0))),
+                         min(alphaAt(px + vec2(0.0, 1.0)), alphaAt(px - vec2(0.0, 1.0))));
   float dark = 1.0 - clamp(dot(light, vec3(0.333)), 0.0, 1.0);
-  vec3 col = t.rgb * light + t.rgb * dark * 0.8 + uSel * 0.25;
+  vec3 rim = mix(uSunColor, vec3(0.75, 0.8, 0.9), 0.5);
+  col += rim * edge * (0.03 + 0.2 * dark * dark);
+
+  col += uSel * 0.25;
   float dist = length(vWorld - cameraPosition);
   float hf = exp(-max(vWorld.y - uFogBase, 0.0) * uFogFalloff);
   float f = 1.0 - exp(-dist * uFogDensity * mix(0.3, 1.0, hf));
