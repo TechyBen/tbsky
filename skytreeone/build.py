@@ -40,6 +40,8 @@ def main():
     (tree / 'src').mkdir(parents=True)
     for js in (WEB / 'src').glob('*.js'):
         (tree / 'src' / js.name).write_text(rewrite(js.read_text('utf-8'), IMPORTS), 'utf-8')
+    for js in tree.glob('*.js'):  # our modules use the bare 'three' too
+        js.write_text(rewrite(js.read_text('utf-8'), {'three': './vendor/three.module.js'}), 'utf-8')
     html = (WEB / 'index.html').read_text('utf-8')
     html, n = re.subn(r'<script type="importmap">.*?</script>\s*', '', html, flags=re.S)
     if n != 1:

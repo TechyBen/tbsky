@@ -1,5 +1,5 @@
-// Chatter: live posts from the people you follow arrive as small pixel birds
-// that settle in the forest. In wander mode you walk among them; near a bird
+// Chatter: live posts from the people you follow arrive as small birds that
+// settle in the forest. In wander mode you walk among them; near a bird
 // its post shows, and Enter opens the thread on bsky.app.
 //
 // Query options (set by the content script):
@@ -30,6 +30,9 @@ const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const smooth = t => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 
+import { buildBird, POSES, sizeFor } from './birdmodel.js';
+import { material as kit, drawCell } from './kit.js';
+
 const api = await new Promise(res => {
   const t = setInterval(() => { if (window.treeps1) { clearInterval(t); res(window.treeps1); } }, 100);
 });
@@ -48,7 +51,7 @@ async function xrpc(method, params) {
 }
 
 async function loadFollows(actor) {
-  const key = `skytree:follows:${actor}`;
+  const key = `skytree:follows2:${actor}`;
   try {
     const c = JSON.parse(localStorage.getItem(key));
     if (c && Date.now() - c.at < FOLLOWS_TTL) return c;
@@ -57,7 +60,7 @@ async function loadFollows(actor) {
   let cursor, n = 0;
   do {
     const j = await xrpc('app.bsky.graph.getFollows', { actor, limit: 100, cursor });
-    for (const f of j.follows) { people[f.did] = [f.handle, f.displayName || '']; n++; }
+    for (const f of j.follows) { people[f.did] = [f.handle, f.displayName || '', f.avatar || '']; n++; }
     cursor = j.cursor;
   } while (cursor && n < MAX_DIDS);
   const c = { at: Date.now(), people };
@@ -124,13 +127,23 @@ if (CHATTER) {
 }
 
 // ---------------------------------------------------------------- birds
-// Three 8x8 frames: wings up, wings down, perched. b body, d wing, w belly,
-// e eye, k beak and feet.
-const ART = [
-  ['..d.....', '..dd....', '...dd.bb', '.bbbbbek', 'bbwwwbb.', '..wwbb..', '........', '........'],
-  ['........', '........', '......bb', '.bbbbbek', 'bbdddbb.', '..dddb..', '...dd...', '........'],
-  ['........', '........', '......bb', '.bbbbbek', 'bbdddbb.', '..wwbb..', '...k.k..', '........'],
-];
+// Each bird is the 3D songbird from birdmodel.js, flattened Façade-style: for
+// every account, its model (coloured loosely from the profile picture) is lit
+// with the forest's current light and rendered into an atlas of billboards,
+// 6 poses x 8 view angles. In the forest a bird is a camera-facing quad that
+// shows one cell. Position moves smoothly; pose and view angle only step every
+// 2-3 seconds, so turning and flapping change billboards slowly.
+const POSE_ROWS = ['perch', 'look', 'hop', 'up', 'glide', 'down'];
+const FLAP = ['up', 'glide', 'down', 'glide'];
+const CW = 48, CH = 36;                 // cell size in pixels
+const SPAN = 0.3, CY = 0.06, EL = 0.25; // framing in model metres (as in the lab)
+const DRAW = 2.7;                       // drawn larger than life, so they read
+
+const bakeCanvas = document.createElement('canvas');
+const baker = new THREE.WebGLRenderer({ canvas: bakeCanvas, alpha: true, antialias: false, preserveDrawingBuffer: true });
+baker.setPixelRatio(1);
+baker.setSize(8 * CW, POSE_ROWS.length * CH, false);
+const bakeScene = new THREE.Scene();
 
 function hash(s) {
   let h = 2166136261;
@@ -138,54 +151,110 @@ function hash(s) {
   return (h >>> 0) / 2 ** 32;
 }
 
-const textures = new Map();
-function textureFor(did) {
-  let t = textures.get(did);
-  if (t) return t;
-  const hue = hash(did);
-  const pal = {
-    b: new THREE.Color().setHSL(hue, 0.55, 0.55),
-    d: new THREE.Color().setHSL(hue, 0.5, 0.36),
-    w: new THREE.Color().setHSL(hue, 0.35, 0.8),
-    e: new THREE.Color(0.08, 0.08, 0.1),
-    k: new THREE.Color(0.95, 0.62, 0.2),
-  };
-  const cv = document.createElement('canvas');
-  cv.width = 24; cv.height = 8;
-  const g = cv.getContext('2d');
-  ART.forEach((rows, f) => rows.forEach((row, y) => [...row].forEach((ch, x) => {
-    if (!pal[ch]) return;
-    g.fillStyle = `#${pal[ch].getHexString()}`;
-    g.fillRect(f * 8 + x, y, 1, 1);
-  })));
-  t = new THREE.CanvasTexture(cv);
-  t.magFilter = t.minFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
-  textures.set(did, t);
-  return t;
+// The forest's light as a short key, to notice when it has changed enough to
+// rebake (scene changes, sunset, moonrise).
+function lightKey() {
+  const r = v => v.toFixed(2);
+  const d = U.uSunDir.value, c = U.uSunColor.value, a = U.uAmbient.value, k = U.uSunStrength.value;
+  return [d.y, c.r * k, c.g * k, c.b * k, a.r, a.g, a.b].map(r).join();
 }
 
-// Camera-facing quad lit like the forest: the same ambient + sun (or moon)
-// light and the same dappled canopy shadow, so a bird darkens with the time
-// of day and passes through sun and shade. Two touches keep it findable in
-// the dark: it never drops below a dim floor (a little brighter than the
-// trees), and its outline pixels catch a faint rim of the sun or moon light.
-// Nothing in the shadow pass.
+// One per account: its colour, size from its follower count, and baked atlas.
+const accounts = new Map();
+const dirty = new Set();
+function account(did) {
+  let a = accounts.get(did);
+  if (a) return a;
+  const fallback = new THREE.Color().setHSL(hash(did), 0.5, 0.5);
+  const canvas = document.createElement('canvas');
+  canvas.width = 8 * CW;
+  canvas.height = POSE_ROWS.length * CH;
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  a = { did, rgb: [fallback.r * 255, fallback.g * 255, fallback.b * 255], size: 1, canvas, tex, baked: '' };
+  accounts.set(did, a);
+  dirty.add(a);
+  const avatar = follows?.people[did]?.[2];
+  if (avatar) avatarColour(avatar).then(rgb => { a.rgb = rgb; dirty.add(a); }).catch(() => {});
+  xrpc('app.bsky.actor.getProfile', { actor: did }).then(p => { a.size = sizeFor(p.followersCount || 0); }).catch(() => {});
+  return a;
+}
+
+// Loosely the picture's colour: pixels weighted by saturation squared times
+// brightness, so the vivid part wins over a grey background; a mostly grey
+// picture gives its plain average.
+async function avatarColour(url) {
+  const r = await fetch(url.replace('/img/avatar/plain/', '/img/avatar_thumbnail/plain/'));
+  if (!r.ok) throw new Error(r.status);
+  const bmp = await createImageBitmap(await r.blob());
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(bmp, 0, 0, 32, 32);
+  const d = g.getImageData(0, 0, 32, 32).data;
+  let sw = 0, sr = 0, sg = 0, sb = 0, ar = 0, ag = 0, ab = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const R = d[i], G = d[i + 1], B = d[i + 2];
+    const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+    const s = mx ? (mx - mn) / mx : 0, w = s * s * (mx / 255);
+    sw += w; sr += w * R; sg += w * G; sb += w * B;
+    ar += R; ag += G; ab += B;
+  }
+  const n = d.length / 4;
+  return sw < n * 0.02 ? [ar / n, ag / n, ab / n] : [sr / sw, sg / sw, sb / sw];
+}
+
+// Render an account's atlas with the forest's current light. The light comes
+// from above at the sun's height (atlases aren't per heading, so its compass
+// direction is fixed toward the bird's front-left, which suits every view).
+function bake(a) {
+  const rig = buildBird(a.rgb);
+  bakeScene.add(rig.bird);
+  const u = kit.uniforms, d = U.uSunDir.value;
+  const el = Math.max(0.15, d.y), h = Math.sqrt(Math.max(0, 1 - el * el));
+  u.uSunDir.value.set(h * 0.7, el, h * 0.7).normalize();
+  u.uSunColor.value.copy(U.uSunColor.value);
+  u.uSunStrength.value = U.uSunStrength.value;
+  u.uAmbient.value.copy(U.uAmbient.value);
+  u.uGrain.value = 4;
+  baker.setScissorTest(false);
+  baker.setClearColor(0x000000, 0);
+  baker.clear();
+  baker.setScissorTest(true);
+  POSE_ROWS.forEach((pose, row) => {
+    POSES[pose](rig);
+    for (let k = 0; k < 8; k++) {
+      drawCell(baker, bakeScene, k * Math.PI / 4, k * CW, row * CH, { w: CW, h: CH, span: SPAN, cy: CY, el: EL });
+    }
+  });
+  const g = a.canvas.getContext('2d');
+  g.clearRect(0, 0, a.canvas.width, a.canvas.height);
+  g.drawImage(bakeCanvas, 0, 0);
+  a.tex.needsUpdate = true;
+  a.baked = lightKey();
+  bakeScene.remove(rig.bird);
+  rig.bird.traverse(o => o.geometry?.dispose());
+}
+
+// Camera-facing quad showing one atlas cell. The bake already has the light;
+// here the canopy's dappled shadow darkens the sun's share as a bird passes
+// through shade, outline pixels catch a faint rim (more in the dark), and the
+// forest's height fog applies. Nothing in the shadow pass.
 const VS = /* glsl */ `
-uniform float uSize;
-uniform float uFlip;
+uniform vec2 uSize;
 varying vec2 vUv;
 varying vec3 vWorld;
 void main() {
   vUv = uv;
   vWorld = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
   vec4 mv = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-  mv.xy += vec2(position.x * uFlip, position.y) * uSize;
+  mv.xy += position.xy * uSize;
   gl_Position = projectionMatrix * mv;
 }`;
 const FS = /* glsl */ `
 uniform sampler2D uMap;
-uniform float uFrame;
+uniform vec2 uCell;  // column (view angle), row (pose)
 uniform float uSel;
 uniform float uPass;
 uniform vec3 uSunDir;
@@ -202,8 +271,9 @@ uniform float uShadowBias;
 uniform float uShadowOn;
 varying vec2 vUv;
 varying vec3 vWorld;
+const vec2 CELL = vec2(${CW}.0, ${CH}.0);
+const vec2 GRID = vec2(8.0, ${POSE_ROWS.length}.0);
 
-// The forest's own lookup: 1 = lit, 0 = in shadow, single nearest tap.
 float shadowAt(vec3 wp) {
   if (uShadowOn < 0.5) return 1.0;
   vec4 sc = uShadowMatrix * vec4(wp, 1.0);
@@ -212,33 +282,27 @@ float shadowAt(vec3 wp) {
   return s.z - uShadowBias > texture2D(uShadowMap, s.xy).r ? 0.0 : 1.0;
 }
 
-// Alpha of one sprite pixel in the current frame (outside it = empty).
-float alphaAt(vec2 px) {
-  if (px.x < 0.0 || px.y < 0.0 || px.x > 7.0 || px.y > 7.0) return 0.0;
-  return texture2D(uMap, vec2((px.x + 0.5 + uFrame * 8.0) / 24.0, (px.y + 0.5) / 8.0)).a;
+// One pixel of the current cell (px from its bottom-left), nearest.
+vec4 cellAt(vec2 px) {
+  if (px.x < 0.0 || px.y < 0.0 || px.x > CELL.x - 1.0 || px.y > CELL.y - 1.0) return vec4(0.0);
+  vec2 uv = vec2((uCell.x * CELL.x + px.x + 0.5) / (GRID.x * CELL.x),
+                 1.0 - ((uCell.y + 1.0) * CELL.y - px.y - 0.5) / (GRID.y * CELL.y));
+  return texture2D(uMap, uv);
 }
 
 void main() {
   if (uPass > 0.5) discard;
-  vec2 px = floor(vUv * 8.0);
-  vec4 t = texture2D(uMap, vec2((px.x + 0.5 + uFrame * 8.0) / 24.0, (px.y + 0.5) / 8.0));
+  vec2 px = floor(vUv * CELL);
+  vec4 t = cellAt(px);
   if (t.a < 0.5) discard;
 
-  // Sun or moon from above, through the canopy (offset toward the light so
-  // the bird doesn't shadow itself), plus the scene's ambient.
-  float up = 0.6 + 0.4 * max(uSunDir.y, 0.0);
-  float sunT = up * shadowAt(vWorld + uSunDir * 0.4);
-  vec3 light = uAmbient + uSunColor * (uSunStrength * sunT);
-  vec3 col = t.rgb * light * mix(0.85, 1.12, vUv.y); // top pixels face the sky
+  float sunL = dot(uSunColor, vec3(0.333)) * uSunStrength, ambL = dot(uAmbient, vec3(0.333));
+  float sunShare = sunL / max(sunL + ambL, 1e-3);
+  vec3 col = t.rgb * mix(1.0 - 0.6 * sunShare, 1.0, shadowAt(vWorld + uSunDir * 0.4));
 
-  // A little brighter than the trees in the dark.
-  col = max(col, t.rgb * 0.16);
-
-  // Outline pixels (next to an empty one) catch a faint rim of light, more
-  // so the darker it is.
-  float edge = 1.0 - min(min(alphaAt(px + vec2(1.0, 0.0)), alphaAt(px - vec2(1.0, 0.0))),
-                         min(alphaAt(px + vec2(0.0, 1.0)), alphaAt(px - vec2(0.0, 1.0))));
-  float dark = 1.0 - clamp(dot(light, vec3(0.333)), 0.0, 1.0);
+  float edge = 1.0 - min(min(cellAt(px + vec2(1.0, 0.0)).a, cellAt(px - vec2(1.0, 0.0)).a),
+                         min(cellAt(px + vec2(0.0, 1.0)).a, cellAt(px - vec2(0.0, 1.0)).a));
+  float dark = 1.0 - clamp(ambL + sunL, 0.0, 1.0);
   vec3 rim = mix(uSunColor, vec3(0.75, 0.8, 0.9), 0.5);
   col += rim * edge * (0.03 + 0.2 * dark * dark);
 
@@ -262,10 +326,11 @@ function land(post, t) {
   perch.y = api.terrainHeight(perch.x, perch.z) + 1.2 + Math.random() * 1.4;
   const b = a + (Math.random() - 0.5) * 1.4;
   const from = new THREE.Vector3(cam.x + Math.cos(b) * 50, perch.y + 12 + Math.random() * 8, cam.z + Math.sin(b) * 50);
+  const acct = account(post.did);
   const mat = new THREE.ShaderMaterial({
     uniforms: {
-      ...U, uMap: { value: textureFor(post.did) }, uFrame: { value: 0 },
-      uFlip: { value: 1 }, uSize: { value: 0.55 }, uSel: { value: 0 },
+      ...U, uMap: { value: acct.tex }, uCell: { value: new THREE.Vector2(0, 3) },
+      uSize: { value: new THREE.Vector2(1, CH / CW) }, uSel: { value: 0 },
     },
     vertexShader: VS, fragmentShader: FS,
   });
@@ -273,10 +338,13 @@ function land(post, t) {
   mesh.frustumCulled = false;
   mesh.position.copy(from);
   group.add(mesh);
-  birds.push({
-    post, mesh, mat, from, perch, to: null, state: 'in', since: t,
-    flight: 7 + Math.random() * 4, phase: Math.random() * 10, hopAt: t + 5 + Math.random() * 10,
-  });
+  const bird = {
+    post, acct, mesh, mat, from, perch, to: null, state: 'in', since: t,
+    flight: 7 + Math.random() * 4, heading: Math.atan2(perch.z - from.z, perch.x - from.x),
+    pose: 'up', flap: 0, nextStep: 0,
+  };
+  birds.push(bird);
+  step(bird, t);
   // Too many: the longest-perched one flies off.
   const perched = birds.filter(x => x.state !== 'out');
   if (perched.length > MAX_BIRDS) flyOff(perched[0], t);
@@ -288,6 +356,41 @@ function flyOff(b, t) {
   b.since = t;
   b.from = b.mesh.position.clone();
   b.to = b.from.clone().add(new THREE.Vector3(Math.cos(a) * 60, 25, Math.sin(a) * 60));
+  b.heading = a;
+  step(b, t);
+}
+
+// Which of the 8 baked views the camera sees, given the bird's heading (its
+// model faces +X; the bake's view k looks from model direction k * 45°).
+function viewCell(b) {
+  const dx = camera.position.x - b.mesh.position.x, dz = camera.position.z - b.mesh.position.z;
+  const c = Math.cos(b.heading), s = Math.sin(b.heading);
+  const k = Math.round(Math.atan2(-dx * s + dz * c, dx * c + dz * s) / (Math.PI / 4));
+  return ((k % 8) + 8) % 8;
+}
+
+// A pose step, every 2-3 seconds: in flight the wings go up, glide, down,
+// glide; perched it mostly sits, sometimes looks round, now and then hops a
+// little to a new spot and faces a new way. The view angle and size only
+// update here too.
+function step(b, t) {
+  b.nextStep = t + 2 + Math.random();
+  if (b.state === 'perch') {
+    const r = Math.random();
+    if (r < 0.12 && b !== selected) {
+      b.pose = 'hop';
+      b.heading = Math.random() * TAU;
+      b.perch.x += Math.cos(b.heading) * 0.3;
+      b.perch.z += Math.sin(b.heading) * 0.3;
+    } else {
+      b.pose = r < 0.4 ? 'look' : 'perch';
+    }
+  } else {
+    b.pose = FLAP[b.flap++ % FLAP.length];
+  }
+  b.mat.uniforms.uCell.value.set(viewCell(b), POSE_ROWS.indexOf(b.pose));
+  const w = SPAN * DRAW * b.acct.size;
+  b.mat.uniforms.uSize.value.set(w, w * CH / CW);
 }
 
 // Each account gets its own voice from the ambience's synthesised birds, so
@@ -306,53 +409,49 @@ function chirp(b) {
   amb.sing(v, amb.ctx.currentTime + 0.05, 0.7);
 }
 
+let lightCheckAt = 0;
 function updateBirds(t, dt) {
   if (!group.parent) scene.add(group);
+  // Rebake when the light has moved on; one atlas per frame at most.
+  if (t > lightCheckAt) {
+    lightCheckAt = t + 2;
+    const key = lightKey();
+    for (const a of accounts.values()) if (a.baked !== key) dirty.add(a);
+  }
+  if (dirty.size) {
+    const a = dirty.values().next().value;
+    dirty.delete(a);
+    if (accounts.has(a.did)) bake(a);
+  }
   if (queue.length && t >= nextLanding) {
     land(queue.shift(), t);
     nextLanding = t + (birds.length < 6 ? 1.5 : 4);
   }
-  camera.getWorldDirection(tmp);
-  right.set(-tmp.z, 0, tmp.x).normalize();
   for (let i = birds.length - 1; i >= 0; i--) {
     const b = birds[i], m = b.mesh, age = t - b.since;
-    let face = null;
     if (b.state === 'in') {
       const k = smooth(age / b.flight);
       m.position.lerpVectors(b.from, b.perch, k);
       m.position.y += Math.sin(k * Math.PI) * 3;
-      b.mat.uniforms.uFrame.value = Math.floor(t * 9 + b.phase) % 2;
-      face = tmp.subVectors(b.perch, b.from).dot(right);
-      if (k >= 1) { b.state = 'perch'; b.since = t; chirp(b); }
+      if (k >= 1) { b.state = 'perch'; b.since = t; step(b, t); chirp(b); }
     } else if (b.state === 'perch') {
-      // Bob, the odd flap, and now and then a little hop.
       m.position.copy(b.perch);
-      m.position.y += 0.03 * Math.sin(t * 2.7 + b.phase);
-      b.mat.uniforms.uFrame.value = Math.sin(t * 0.9 + b.phase) > 0.97 ? Math.floor(t * 9) % 2 : 2;
-      if (t > b.hopAt && b !== selected) {
-        b.hopAt = t + 6 + Math.random() * 12;
-        const a = Math.random() * TAU;
-        b.perch.x += Math.cos(a) * 0.4;
-        b.perch.z += Math.sin(a) * 0.4;
-        face = Math.cos(a) * right.x + Math.sin(a) * right.z;
-      }
       // Stay put while someone is close enough to read.
       const near = wander && m.position.distanceTo(camera.position) < REACH * 2;
       if (age > STAY && !near) flyOff(b, t);
     } else {
       const k = smooth(age / 8);
       m.position.lerpVectors(b.from, b.to, k);
-      b.mat.uniforms.uFrame.value = Math.floor(t * 10 + b.phase) % 2;
-      face = tmp.subVectors(b.to, b.from).dot(right);
       if (k >= 1) {
         group.remove(m);
         b.mat.dispose();
         birds.splice(i, 1);
+        // Last bird of this account gone: drop its atlas.
+        if (!birds.some(x => x.acct === b.acct)) { b.acct.tex.dispose(); accounts.delete(b.acct.did); dirty.delete(b.acct); }
         continue;
       }
     }
-    // The art faces right; flip it to face the way it's going.
-    if (face) b.mat.uniforms.uFlip.value = face < 0 ? -1 : 1;
+    if (t >= b.nextStep) step(b, t);
   }
 }
 
