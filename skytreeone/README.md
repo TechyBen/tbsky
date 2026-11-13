@@ -6,6 +6,13 @@ New posts from the people you follow arrive as little birds that settle in the t
 
 ![The dark theme over a forest](docs/dark.png)
 
+| Daytime sun | Winter snow |
+|---|---|
+| ![Fern Hollow at midday, sun through the trunks](docs/sun-fern-hollow.png) | ![Misty Dawn (dense) in falling snow](docs/snow-misty-dawn.png) |
+| ![Golden Sunrise (dense), birds in the undergrowth](docs/sun-golden-sunrise.png) | ![Ember Oak (dense) in snow](docs/snow-ember-oak.png) |
+
+The snow uses playtreeone's own weather settings (manual snow, cloud and visibility); the extension doesn't switch weather on yet. The birds with a soft green glow are ones you've seen, and blue ones you've read.
+
 ## Install (unpacked)
 
 ```bash
