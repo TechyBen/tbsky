@@ -9,6 +9,9 @@ chrome.storage.sync.get(SKYTREE_DEFAULTS).then(cfg => {
     if (el.type === 'checkbox') {
       el.checked = cfg[key];
       el.addEventListener('change', () => chrome.storage.sync.set({ [key]: el.checked }));
+    } else if (el.tagName === 'SELECT') {
+      el.value = cfg[key];
+      el.addEventListener('change', () => chrome.storage.sync.set({ [key]: el.value }));
     } else if (el.type === 'text') {
       el.value = cfg[key];
       el.addEventListener('change', () => chrome.storage.sync.set({ [key]: el.value.trim().replace(/^@/, '') }));

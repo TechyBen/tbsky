@@ -21,6 +21,7 @@ Then in Chrome or Edge, open `chrome://extensions`, turn on **Developer mode**, 
 | Setting | Default | |
 |---|---|---|
 | Forest behind Bluesky | on | Switching off restores Bluesky exactly |
+| Forest style | Dense | **Dense**: closer stands with trails, hillsides, ferns and moss (dense versions of the original scenes, plus Fern Hollow and Moss Ravine). **Sparse**: the original open woods around a wide clearing |
 | Birds from people I follow | on | Live posts land in the trees as birds |
 | Whose follows | blank | Blank uses the account signed in to bsky.app; type a handle to use someone else's follows |
 | Sound | off | Wind and birds. Browsers only start audio after a click, so it starts on your next click on Bluesky, and pauses while the tab is hidden |

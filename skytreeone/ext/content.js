@@ -29,7 +29,7 @@
     const q = new URLSearchParams({
       // Sound starts off; it's switched live by message (see sendSound).
       saver: '', audio: 0, mins: cfg.mins,
-      px: cfg.px, fps: cfg.fps, realsun: 1, weather: 0,
+      px: cfg.px, fps: cfg.fps, realsun: 1, weather: 0, style: cfg.style,
       chatter: cfg.chatter && who ? 1 : 0, me: cfg.chatter ? who : '', parent: location.origin,
     });
     return `${BASE}?${q.toString().replace('saver=', 'saver')}`;

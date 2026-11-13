@@ -9,10 +9,11 @@ const SKYTREE_DEFAULTS = {
   fps: 30,       // frame cap
   glass: 70,     // opacity of the panel behind the feed, 0-100
   blur: 6,       // blur behind the feed, px
+  style: 'dense', // 'dense' (ferns, trails, slopes) or 'sparse' (the original open woods)
   chatter: true, // posts from people you follow arrive as birds
   handle: '',    // whose follows; blank = the account signed in to bsky.app
 };
 
 // Settings that change the forest page itself (the rest only restyle Bluesky).
 // eslint-disable-next-line no-unused-vars
-const SKYTREE_RELOAD = ['enabled', 'mins', 'px', 'fps', 'chatter', 'handle'];
+const SKYTREE_RELOAD = ['enabled', 'style', 'mins', 'px', 'fps', 'chatter', 'handle'];

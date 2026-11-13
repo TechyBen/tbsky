@@ -15,6 +15,8 @@
   input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
   output { color: var(--dim); font-variant-numeric: tabular-nums; }
   .note { color: var(--dim); font-size: 11px; margin: -6px 0 8px 22px; }
+  select { grid-column: 1 / -1; width: 100%; padding: 5px 6px; border-radius: 6px; background: var(--bg); color: inherit; font: inherit;
+    border: 1px solid color-mix(in srgb, var(--dim) 45%, transparent); }
   input[type="text"] { grid-column: 1 / -1; width: 100%; box-sizing: border-box; padding: 5px 8px; border-radius: 6px;
     border: 1px solid color-mix(in srgb, var(--dim) 45%, transparent); background: transparent; color: inherit; font: inherit; }
   button { width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: var(--accent); color: var(--bg);
@@ -27,6 +29,12 @@
 <body>
 <h1>skytreeone</h1>
 <label class="check"><input type="checkbox" id="enabled"> Forest behind Bluesky</label>
+<label>Forest style
+  <select id="style">
+    <option value="dense">Dense: ferns, trails, hillsides</option>
+    <option value="sparse">Sparse: the original open woods</option>
+  </select>
+</label>
 <label class="check"><input type="checkbox" id="sound"> Sound</label>
 <div class="note">Starts after your next click on Bluesky.</div>
 <label>Volume <output for="vol"></output><input type="range" id="vol" min="0" max="100" step="5"></label>
