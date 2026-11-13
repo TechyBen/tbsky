@@ -343,7 +343,18 @@ void main() {
   if (uPass > 0.5) discard;
   vec2 px = floor(vUv * CELL);
   vec4 t = cellAt(px);
-  if (t.a < 0.5) discard;
+  float fogK = clamp(1.0 - exp(-length(vWorld - cameraPosition) * uFogDensity * 0.65), 0.0, 1.0) * 0.9;
+  // Glow (seen/read marks, or the bird you're facing): a faint, partly
+  // transparent halo one pixel out around the silhouette.
+  vec3 glowCol = mix(uMark.rgb, vec3(1.0, 0.96, 0.88), uSel);
+  float glowA = max(uMark.a, uSel * 0.5);
+  if (t.a < 0.5) {
+    float near = max(max(cellAt(px + vec2(1.0, 0.0)).a, cellAt(px - vec2(1.0, 0.0)).a),
+                     max(cellAt(px + vec2(0.0, 1.0)).a, cellAt(px - vec2(0.0, 1.0)).a));
+    if (near < 0.5 || glowA <= 0.0) discard;
+    gl_FragColor = vec4(mix(glowCol, uFogColor, fogK), 0.32 * glowA);
+    return;
+  }
 
   float sunL = dot(uSunColor, vec3(0.333)) * uSunStrength, ambL = dot(uAmbient, vec3(0.333));
   float sunShare = sunL / max(sunL + ambL, 1e-3);
@@ -354,9 +365,9 @@ void main() {
   float dark = 1.0 - clamp(ambL + sunL, 0.0, 1.0);
   vec3 rim = mix(uSunColor, vec3(0.75, 0.8, 0.9), 0.5);
   col += rim * edge * (0.03 + 0.2 * dark * dark);
-  col = mix(col, uMark.rgb, edge * uMark.a);
-
-  col += uSel * 0.25;
+  // Marks and selection glow softly (added like light), not painted on.
+  col += uMark.rgb * edge * uMark.a * 0.55;
+  col = mix(col, vec3(1.0, 0.96, 0.88), uSel * (0.1 + 0.25 * edge));
   float dist = length(vWorld - cameraPosition);
   float hf = exp(-max(vWorld.y - uFogBase, 0.0) * uFogFalloff);
   float f = 1.0 - exp(-dist * uFogDensity * mix(0.3, 1.0, hf));
@@ -462,6 +473,7 @@ function land(post, t) {
       uMark: { value: new THREE.Vector4(0, 0, 0, 0) },
     },
     vertexShader: VS, fragmentShader: FS,
+    transparent: true, // only the glow halo is see-through; the bird is opaque
   });
   const mesh = new THREE.Mesh(quad, mat);
   mesh.frustumCulled = false;
@@ -491,7 +503,8 @@ function flyOff(b, t) {
   step(b, t);
 }
 
-const MARKS = [null, new THREE.Vector4(0.45, 0.9, 0.5, 0.75), new THREE.Vector4(0.45, 0.68, 1, 0.8)];
+// Seen: a soft green glow; read: a soft blue one (paler, partly transparent).
+const MARKS = [null, new THREE.Vector4(0.62, 0.86, 0.64, 0.6), new THREE.Vector4(0.62, 0.74, 0.95, 0.65)];
 function paintMark(b) {
   b.mat.uniforms.uMark.value.copy(MARKS[b.post.mark || 0] || new THREE.Vector4());
 }
