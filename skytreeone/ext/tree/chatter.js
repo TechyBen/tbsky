@@ -785,6 +785,7 @@ addEventListener('pointerdown', e => {
 });
 addEventListener('pointermove', e => {
   if (!dragging) return;
+  if (api.edge?.busy()) { dragging = { x: e.clientX, y: e.clientY }; return; }
   yaw += (e.clientX - dragging.x) * 0.004;
   pitch = clamp(pitch - (e.clientY - dragging.y) * 0.004, -1.2, 1.2);
   dragging = { x: e.clientX, y: e.clientY };
@@ -792,7 +793,10 @@ addEventListener('pointermove', e => {
 addEventListener('pointerup', () => { dragging = null; document.body.classList.remove('dragging'); });
 
 function updateWander(t, dt) {
-  const has = c => keys.has(c);
+  // On the way back from the forest's edge: no walking or turning until the
+  // fog clears.
+  const held = api.edge?.busy();
+  const has = c => !held && keys.has(c);
   // Arrow keys turn, A/D step sideways, Shift runs.
   yaw += ((has('ArrowRight') ? 1 : 0) - (has('ArrowLeft') ? 1 : 0)) * 1.6 * dt;
   const fwd = (has('KeyW') || has('ArrowUp') ? 1 : 0) - (has('KeyS') || has('ArrowDown') ? 1 : 0);
@@ -825,6 +829,24 @@ function updateWander(t, dt) {
     ? `${n} ${n === 1 ? 'bird' : 'birds'} · ` : `${status} · `) +
     'WASD walk · drag to look · Esc back';
 }
+
+// Walked out of the forest: under full fog you're put back in the middle
+// (see edgeReturn in main.js). Birds near you come too, settling on whatever
+// is near their new spot; ones flying off just carry on.
+api.edge?.onReturn.push((dx, dy, dz) => {
+  pos.x += dx;
+  pos.z += dz;
+  const d = new THREE.Vector3(dx, dy, dz);
+  for (const b of birds) {
+    if (b.state === 'out') { b.from.add(d); b.to.add(d); b.mesh.position.add(d); continue; }
+    const spot = pickPerch(b.perch.x + dx, b.perch.z + dz, 0, 8, null, b);
+    b.perch = spot.at;
+    b.kind = spot.kind;
+    b.trunk = spot.trunk;
+    b.from.add(d);
+    if (b.state === 'perch') b.mesh.position.copy(b.perch).setY(b.perch.y + lift(b));
+  }
+});
 
 // After the screensaver's camera move, so wander mode can take over.
 let last = performance.now() / 1000;
